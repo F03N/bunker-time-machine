@@ -1,1 +1,10 @@
 project_id = "hpgjtaklusisluklfbwl"
+
+[functions.gemini-generate]
+verify_jwt = false
+
+[functions.imagen-generate]
+verify_jwt = false
+
+[functions.veo-generate]
+verify_jwt = false
