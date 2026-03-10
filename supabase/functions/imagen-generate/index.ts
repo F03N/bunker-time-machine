@@ -33,7 +33,7 @@ serve(async (req) => {
         referenceImage: {
           bytesBase64Encoded: referenceImageBase64,
         },
-        referenceType: "STYLE",
+        referenceType: "STYLE_REFERENCE",
         referenceId: 1,
       }];
     }
