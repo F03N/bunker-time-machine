@@ -3,23 +3,38 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
-import { Check, RefreshCw, ImageIcon } from 'lucide-react';
-import { callImagen, getImageModel } from '@/lib/google-ai';
+import { Check, RefreshCw, ImageIcon, AlertTriangle } from 'lucide-react';
+import { callImagen, getImageModel, imageUrlToBase64 } from '@/lib/google-ai';
 import { toast } from 'sonner';
 
 export function SceneImageChain() {
   const { scenes, updateScene, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
   const [activeScene, setActiveScene] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Store base64 data per scene for chaining (in-memory only, not persisted)
+  const [sceneBase64, setSceneBase64] = useState<Record<number, string>>({});
 
   const handleGenerate = async (idx: number) => {
+    setErrorMsg(null);
     updateScene(idx, { generating: true });
+
     try {
-      const prevScene = idx > 0 ? scenes[idx - 1] : null;
       let referenceImageBase64: string | undefined;
 
-      // If previous scene has a generated image, fetch its base64 for reference
-      if (prevScene?.generatedImageUrl && prevScene.generatedImageUrl.startsWith('data:')) {
-        referenceImageBase64 = prevScene.generatedImageUrl.split(',')[1];
+      // Chain from previous scene
+      if (idx > 0) {
+        const prevScene = scenes[idx - 1];
+        if (!prevScene.approved || !prevScene.generatedImageUrl) {
+          throw new Error(`Scene ${idx} must be approved first`);
+        }
+
+        // Use stored base64 if available, otherwise convert from URL
+        if (sceneBase64[idx - 1]) {
+          referenceImageBase64 = sceneBase64[idx - 1];
+        } else if (prevScene.generatedImageUrl) {
+          referenceImageBase64 = await imageUrlToBase64(prevScene.generatedImageUrl);
+        }
       }
 
       const result = await callImagen({
@@ -27,21 +42,26 @@ export function SceneImageChain() {
         model: getImageModel(qualityMode),
         referenceImageBase64,
         sceneIndex: idx,
-        projectName: name.replace(/\s+/g, '_'),
+        projectName: name.replace(/\s+/g, '_') || 'project',
       });
+
+      // Store base64 for chaining to next scene
+      if (result.imageBase64) {
+        setSceneBase64(prev => ({ ...prev, [idx]: result.imageBase64 }));
+      }
 
       updateScene(idx, {
         generating: false,
         generatedImageUrl: result.imageUrl,
       });
 
-      // Store base64 in a hidden field for chaining to next scene
-      (scenes[idx] as any)._base64 = result.imageBase64;
-      toast.success(`Scene ${idx + 1} generated`);
+      toast.success(`Scene ${idx + 1} generated via Imagen`);
     } catch (err) {
       console.error(`Scene ${idx + 1} generation failed:`, err);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setErrorMsg(msg);
       updateScene(idx, { generating: false });
-      toast.error(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast.error(`Scene ${idx + 1} failed: ${msg}`);
     }
   };
 
@@ -58,7 +78,7 @@ export function SceneImageChain() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Scene Image Chain</h1>
-        <p className="text-sm text-muted-foreground">Generate images via Imagen. Each uses the previous as reference.</p>
+        <p className="text-sm text-muted-foreground">Generate images via Imagen. Each uses the previous as structural reference.</p>
       </div>
 
       {/* Scene selector strip */}
@@ -66,11 +86,11 @@ export function SceneImageChain() {
         {scenes.map((s, i) => (
           <button
             key={i}
-            onClick={() => setActiveScene(i)}
+            onClick={() => { setActiveScene(i); setErrorMsg(null); }}
             className={`
               shrink-0 w-9 h-9 rounded-md flex items-center justify-center text-xs font-bold transition-all
               ${i === activeScene ? 'bg-primary text-primary-foreground' : ''}
-              ${s.approved ? 'bg-step-complete/20 text-step-complete border border-step-complete/30' : ''}
+              ${s.approved && i !== activeScene ? 'bg-step-complete/20 text-step-complete border border-step-complete/30' : ''}
               ${!s.approved && i !== activeScene ? 'bg-secondary text-muted-foreground' : ''}
               ${s.generating ? 'generation-pulse' : ''}
             `}
@@ -88,6 +108,9 @@ export function SceneImageChain() {
             <span className="text-muted-foreground">Reference:</span>
             <span className="text-foreground font-semibold">Scene {activeScene} — {prevScene.title}</span>
             {prevScene.approved && <Check className="w-3 h-3 text-step-complete ml-auto" />}
+            {sceneBase64[activeScene - 1] && (
+              <span className="text-[10px] text-step-complete font-mono">base64 ✓</span>
+            )}
           </div>
           {prevScene.generatedImageUrl && (
             <img
@@ -97,6 +120,19 @@ export function SceneImageChain() {
               style={{ maxHeight: '120px', objectPosition: 'top' }}
             />
           )}
+        </WorkshopCard>
+      )}
+
+      {/* Error display */}
+      {errorMsg && (
+        <WorkshopCard className="border-destructive/40 bg-destructive/5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-destructive">Generation Failed</p>
+              <p className="text-xs text-destructive/80 font-mono mt-1">{errorMsg}</p>
+            </div>
+          </div>
         </WorkshopCard>
       )}
 
@@ -128,6 +164,7 @@ export function SceneImageChain() {
                     variant="outline"
                     size="sm"
                     onClick={() => handleGenerate(activeScene)}
+                    disabled={currentScene.generating}
                     className="flex-1 touch-target"
                   >
                     <RefreshCw className="w-4 h-4 mr-1" /> Regenerate
