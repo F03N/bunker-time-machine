@@ -50,9 +50,7 @@ async function handleStart(body: any, apiKey: string) {
     instance.image = { bytesBase64Encoded: startImageBase64 };
   }
 
-  if (endImageBase64) {
-    instance.endImage = { bytesBase64Encoded: endImageBase64 };
-  }
+  // endImage is NOT supported by veo-3.1-generate-preview
 
   const requestBody = {
     instances: [instance],
