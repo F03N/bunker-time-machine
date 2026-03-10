@@ -6,6 +6,8 @@ export type SpeedMultiplier = 1 | 2 | 3 | 4;
 
 export type TransitionFrameMode = 'start-only' | 'start-end' | 'guided-target' | 'reference-ingredients';
 
+export type VideoProvider = 'veo' | 'kling';
+
 export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export const STEP_LABELS: Record<WorkflowStep, string> = {
@@ -88,6 +90,7 @@ export interface TransitionPair {
   approved: boolean;
   generating: boolean;
   motionSettings: MotionSettings;
+  videoProvider?: VideoProvider;
 }
 
 export interface MotionSettings {
