@@ -59,7 +59,7 @@ async function handleStart(body: any, apiKey: string) {
     parameters: {
       aspectRatio: "9:16",
       durationSeconds: 5,
-      personGeneration: "ALLOW_ALL",
+      personGeneration: "ALLOW_ADULT",
       safetyFilterLevel: "BLOCK_ONLY_HIGH",
     },
   };

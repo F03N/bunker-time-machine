@@ -42,7 +42,7 @@ serve(async (req) => {
       parameters: {
         sampleCount: 1,
         aspectRatio: "9:16",
-        personGeneration: "ALLOW_ALL",
+        personGeneration: "ALLOW_ADULT",
         safetyFilterLevel: "BLOCK_ONLY_HIGH",
       },
     };
