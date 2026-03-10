@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ProjectState, WorkflowStep, QualityMode, BunkerIdea, SceneData, TransitionPair, AudioData, ContinuityFlag, SpeedMultiplier, MotionPreset, TransitionFrameMode, MotionSettings, DEFAULT_MOTION_SETTINGS } from '@/types/project';
+import type { ProjectState, WorkflowStep, QualityMode, BunkerIdea, SceneData, TransitionPair, AudioData, ContinuityFlag } from '@/types/project';
 import { SCENE_TITLES } from '@/types/project';
 
 interface ProjectStore extends ProjectState {
