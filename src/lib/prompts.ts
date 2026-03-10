@@ -41,15 +41,15 @@ The 9 scenes MUST follow this exact sequence:
 
 For EACH scene, return a JSON array with objects containing:
 - "title": string (the scene name from above)
-- "imagePrompt": string (detailed text-to-image prompt for Imagen. Must specify: same bunker structure, same camera angle, same framing, same environment, 9:16 vertical, photorealistic. For scenes 3-8 with visible structural changes, workers/tools MUST be mentioned.)
+- "imagePrompt": string (detailed text-to-image prompt for Imagen. Must specify: same bunker structure, same camera angle, same framing, same environment, 9:16 vertical, photorealistic. DO NOT mention any people, workers, hands, or human figures - the image generator cannot render people. Show tools, equipment, scaffolding, and construction materials instead.)
 - "motionPrompt": string (short motion description for video transition. Must be restrained: minimal camera movement, no dramatic effects, construction timelapse style.)
 - "narration": string (1-2 sentence voiceover narration for this scene)
 - "notes": string (technical notes about maintaining continuity with previous scene)
 
 CRITICAL RULES:
 - Every prompt must maintain the EXACT same bunker identity, entrance geometry, and camera angle
-- If repair is visible, workers or tools MUST be present in the prompt
-- No magical self-repair. All changes must have a believable physical cause.
+- NEVER mention people, workers, humans, hands, or figures in imagePrompt - this will cause generation to fail
+- Show progress through tools, scaffolding, building materials, and equipment instead of people
 - Motion prompts must be minimal - x1 speed, no dramatic camera movement
 
 Return ONLY the JSON array, no markdown formatting or code blocks.`;
