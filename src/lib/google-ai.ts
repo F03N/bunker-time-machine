@@ -86,7 +86,7 @@ export async function callImagen(req: ImagenRequest): Promise<ImagenResponse> {
 }
 
 export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
-  // Step 1: Start the operation
+  // Step 1: Start the task via KIE.AI
   const { data: startData, error: startError } = await supabase.functions.invoke('veo-generate', {
     body: { ...req, mode: 'start' },
   });
@@ -94,15 +94,14 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
   if (startError) throw new Error(`Veo error: ${startError.message}`);
   if (startData?.error) throw new Error(`${startData.error}${startData.details ? ': ' + startData.details : ''}`);
 
-  if (startData.status !== 'started' || !startData.operationName) {
-    throw new Error(startData.error || 'Failed to start Veo operation');
+  const taskId = startData.taskId || startData.operationName;
+  if (startData.status !== 'started' || !taskId) {
+    throw new Error(startData.error || 'Failed to start Veo task');
   }
 
-  const operationName = startData.operationName;
-
-  // Step 2: Poll for completion (client-side polling, each poll is a short edge function call)
-  const maxPolls = 60; // 60 * 5s = 5 minutes
-  const pollInterval = 5000; // 5 seconds
+  // Step 2: Poll for completion
+  const maxPolls = 120; // 120 * 5s = 10 minutes (KIE can take longer)
+  const pollInterval = 5000;
 
   for (let i = 0; i < maxPolls; i++) {
     await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -110,7 +109,8 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
     const { data: pollData, error: pollError } = await supabase.functions.invoke('veo-generate', {
       body: {
         mode: 'poll',
-        operationName,
+        taskId,
+        operationName: taskId,
         projectName: req.projectName,
         pairIndex: req.pairIndex,
       },
@@ -118,7 +118,7 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
 
     if (pollError) {
       console.warn(`Poll ${i + 1} error:`, pollError.message);
-      continue; // Retry on poll errors
+      continue;
     }
 
     if (pollData?.done) {
@@ -126,15 +126,15 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
         throw new Error(pollData.error || 'Veo generation failed');
       }
       return {
-        videoUrl: pollData.videoUrl || pollData.videoUri,
+        videoUrl: pollData.videoUrl,
         status: 'complete',
-        operationName,
+        operationName: taskId,
         storagePath: pollData.storagePath,
       };
     }
   }
 
-  throw new Error(`Video generation timed out after 5 minutes. Operation: ${operationName}`);
+  throw new Error(`Video generation timed out after 10 minutes. Task: ${taskId}`);
 }
 
 export async function callKling(req: KlingRequest): Promise<KlingResponse> {

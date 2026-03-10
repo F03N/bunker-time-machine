@@ -171,7 +171,7 @@ export function PairTransitionStudio() {
               : 'bg-secondary text-muted-foreground'
           }`}
         >
-          🎥 Veo (Google)
+          🎥 Veo 3.1 (KIE)
         </button>
       </div>
 
@@ -336,7 +336,7 @@ export function PairTransitionStudio() {
 
         <div className="mt-3 p-2 rounded bg-secondary">
           <p className="text-[10px] text-muted-foreground">
-            <span className="font-semibold">Provider:</span> {videoProvider === 'kling' ? 'Kling v2.6 via PiAPI — Image-to-Video with start + end frames.' : 'Veo 3.1 via Google — Start + End Frames (Guided).'}
+            <span className="font-semibold">Provider:</span> {videoProvider === 'kling' ? 'Kling v2.6 via PiAPI — Image-to-Video with start + end frames.' : 'Veo 3.1 via KIE.AI — Start + End Frames (FIRST_AND_LAST_FRAMES_2_VIDEO).'}
           </p>
         </div>
       </WorkshopCard>
