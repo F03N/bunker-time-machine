@@ -24,19 +24,9 @@ serve(async (req) => {
     const modelId = model || "imagen-4.0-generate-001";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict?key=${GOOGLE_AI_API_KEY}`;
 
-    // Build request - Gemini API Imagen format
+    // Build request - Imagen 4 is text-to-image only (no reference images supported)
+    // Continuity is maintained through detailed, consistent prompts
     const instances: any[] = [{ prompt }];
-
-    // Reference image for structural continuity (style transfer)
-    if (referenceImageBase64) {
-      instances[0].referenceImages = [{
-        referenceImage: {
-          bytesBase64Encoded: referenceImageBase64,
-        },
-        referenceType: "STYLE_REFERENCE",
-        referenceId: 1,
-      }];
-    }
 
     const requestBody = {
       instances,
