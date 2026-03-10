@@ -67,25 +67,54 @@ async function handleStart(body: any, apiKey: string) {
 
   console.log(`Starting Veo generation: model=${modelId}, hasStart=${!!startImageBase64}, hasEnd=${!!endImageBase64}`);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody),
-  });
+  // Retry with exponential backoff for rate limits
+  const maxRetries = 3;
+  let response: Response | null = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Veo API error:", response.status, errorText);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (response.status === 429 && attempt < maxRetries - 1) {
+      const retryAfter = response.headers.get("Retry-After");
+      const waitMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : Math.pow(2, attempt + 1) * 5000 + Math.random() * 2000;
+      console.log(`Rate limited (429), waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 2}/${maxRetries}`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      continue;
+    }
+    break;
+  }
+
+  if (!response!.ok) {
+    const errorText = await response!.text();
+    console.error("Veo API error:", response!.status, errorText);
+
+    if (response!.status === 429) {
+      return new Response(JSON.stringify({
+        error: "تم تجاوز حصة API. حاول مرة أخرى بعد دقائق.",
+        errorCode: "RATE_LIMITED",
+        details: errorText,
+      }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({
-      error: `Veo API error (${response.status})`,
+      error: `Veo API error (${response!.status})`,
       details: errorText,
     }), {
-      status: response.status === 429 ? 429 : 500,
+      status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  const operationData = await response.json();
+  const operationData = await response!.json();
   const operationName = operationData.name;
 
   if (!operationName) {

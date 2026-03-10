@@ -94,9 +94,14 @@ export function PairTransitionStudio() {
     } catch (err) {
       console.error('Transition generation failed:', err);
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      setErrorMsg(msg);
+      const isRateLimit = msg.includes('429') || msg.includes('RATE_LIMITED') || msg.includes('quota');
+      setErrorMsg(isRateLimit
+        ? 'تم تجاوز حصة Google API. انتظر بضع دقائق ثم حاول مرة أخرى.'
+        : msg);
       updateTransition(activePair, { generating: false });
-      toast.error(`Transition failed: ${msg}`);
+      toast.error(isRateLimit
+        ? 'تم تجاوز حصة API — حاول مرة أخرى بعد دقائق'
+        : `Transition failed: ${msg}`);
     }
   };
 
