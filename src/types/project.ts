@@ -90,6 +90,7 @@ export interface TransitionPair {
   approved: boolean;
   generating: boolean;
   motionSettings: MotionSettings;
+  videoProvider?: VideoProvider;
 }
 
 export interface MotionSettings {
