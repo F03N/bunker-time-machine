@@ -114,7 +114,7 @@ async function handleStart(body: any, apiKey: string) {
     });
   }
 
-  const operationData = await response.json();
+  const operationData = await response!.json();
   const operationName = operationData.name;
 
   if (!operationName) {
