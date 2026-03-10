@@ -42,8 +42,8 @@ serve(async (req) => {
       parameters: {
         sampleCount: 1,
         aspectRatio: "9:16",
-        personGeneration: "ALLOW_ADULT",
-        safetyFilterLevel: "BLOCK_ONLY_HIGH",
+        personGeneration: "DONT_ALLOW",
+        safetyFilterLevel: "BLOCK_MEDIUM_AND_ABOVE",
       },
     };
 
