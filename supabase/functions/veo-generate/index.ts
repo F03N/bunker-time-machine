@@ -47,7 +47,9 @@ async function handleStart(body: any, apiKey: string) {
   const instance: any = { prompt };
 
   if (startImageBase64) {
-    instance.image = { bytesBase64Encoded: startImageBase64 };
+    // Strip data URL prefix if present
+    const cleanBase64 = startImageBase64.includes(',') ? startImageBase64.split(',')[1] : startImageBase64;
+    instance.image = { bytesBase64Encoded: cleanBase64, mimeType: "image/png" };
   }
 
   // endImage is NOT supported by veo-3.1-generate-preview
