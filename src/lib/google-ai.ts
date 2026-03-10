@@ -39,6 +39,24 @@ interface VeoResponse {
   storagePath?: string;
 }
 
+interface KlingRequest {
+  prompt: string;
+  startImageBase64: string;
+  endImageBase64?: string;
+  pairIndex: number;
+  projectName: string;
+  klingVersion?: string;
+  klingMode?: string;
+  duration?: number;
+}
+
+interface KlingResponse {
+  videoUrl?: string;
+  status: string;
+  taskId?: string;
+  storagePath?: string;
+}
+
 export async function callGemini({ messages, model, systemPrompt }: GeminiRequest): Promise<string> {
   const { data, error } = await supabase.functions.invoke('gemini-generate', {
     body: { messages, model, systemPrompt },
