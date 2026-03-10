@@ -68,24 +68,55 @@ export async function callImagen(req: ImagenRequest): Promise<ImagenResponse> {
 }
 
 export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
-  const { data, error } = await supabase.functions.invoke('veo-generate', {
-    body: req,
+  // Step 1: Start the operation
+  const { data: startData, error: startError } = await supabase.functions.invoke('veo-generate', {
+    body: { ...req, mode: 'start' },
   });
 
-  if (error) throw new Error(`Veo error: ${error.message}`);
-  if (data?.error) throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
+  if (startError) throw new Error(`Veo error: ${startError.message}`);
+  if (startData?.error) throw new Error(`${startData.error}${startData.details ? ': ' + startData.details : ''}`);
 
-  if (data.status === 'timeout') {
-    throw new Error(`Video generation timed out. Operation: ${data.operationName}. Try again or check Google AI Studio.`);
+  if (startData.status !== 'started' || !startData.operationName) {
+    throw new Error(startData.error || 'Failed to start Veo operation');
   }
 
-  return {
-    videoUrl: data.videoUrl,
-    status: data.status || 'complete',
-    operationName: data.operationName,
-    message: data.message,
-    storagePath: data.storagePath,
-  };
+  const operationName = startData.operationName;
+
+  // Step 2: Poll for completion (client-side polling, each poll is a short edge function call)
+  const maxPolls = 60; // 60 * 5s = 5 minutes
+  const pollInterval = 5000; // 5 seconds
+
+  for (let i = 0; i < maxPolls; i++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    const { data: pollData, error: pollError } = await supabase.functions.invoke('veo-generate', {
+      body: {
+        mode: 'poll',
+        operationName,
+        projectName: req.projectName,
+        pairIndex: req.pairIndex,
+      },
+    });
+
+    if (pollError) {
+      console.warn(`Poll ${i + 1} error:`, pollError.message);
+      continue; // Retry on poll errors
+    }
+
+    if (pollData?.done) {
+      if (pollData.status === 'error') {
+        throw new Error(pollData.error || 'Veo generation failed');
+      }
+      return {
+        videoUrl: pollData.videoUrl || pollData.videoUri,
+        status: 'complete',
+        operationName,
+        storagePath: pollData.storagePath,
+      };
+    }
+  }
+
+  throw new Error(`Video generation timed out after 5 minutes. Operation: ${operationName}`);
 }
 
 export function getImageModel(quality: QualityMode): string {
