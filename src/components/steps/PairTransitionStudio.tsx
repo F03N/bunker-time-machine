@@ -171,7 +171,7 @@ export function PairTransitionStudio() {
               : 'bg-secondary text-muted-foreground'
           }`}
         >
-          🎥 Veo (Google)
+          🎥 Veo 3.1 (KIE)
         </button>
       </div>
 
