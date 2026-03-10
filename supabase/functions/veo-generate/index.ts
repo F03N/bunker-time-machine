@@ -52,7 +52,10 @@ async function handleStart(body: any, apiKey: string) {
     instance.image = { bytesBase64Encoded: cleanBase64, mimeType: "image/png" };
   }
 
-  // endImage is NOT supported by veo-3.1-generate-preview
+  if (endImageBase64) {
+    const cleanEnd = endImageBase64.includes(',') ? endImageBase64.split(',')[1] : endImageBase64;
+    instance.lastFrame = { bytesBase64Encoded: cleanEnd, mimeType: "image/png" };
+  }
 
   const requestBody = {
     instances: [instance],
