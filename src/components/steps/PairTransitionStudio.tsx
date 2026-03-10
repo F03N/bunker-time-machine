@@ -5,8 +5,8 @@ import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
 import { DEFAULT_MOTION_SETTINGS } from '@/types/project';
 import type { TransitionPair, SpeedMultiplier, MotionPreset } from '@/types/project';
-import { Check, Play, RefreshCw } from 'lucide-react';
-import { callVeo, getVideoModel } from '@/lib/google-ai';
+import { Check, Play, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react';
+import { callVeo, getVideoModel, imageUrlToBase64 } from '@/lib/google-ai';
 import { toast } from 'sonner';
 
 const MOTION_PRESETS: { value: MotionPreset; label: string }[] = [
@@ -22,6 +22,7 @@ const SPEEDS: SpeedMultiplier[] = [1, 2, 3, 4];
 export function PairTransitionStudio() {
   const { scenes, transitions, setTransitions, updateTransition, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
   const [activePair, setActivePair] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (transitions.length === 0) {
@@ -48,47 +49,29 @@ export function PairTransitionStudio() {
   const endScene = scenes[pair.endSceneIndex];
 
   const handleGenerate = async () => {
+    setErrorMsg(null);
     updateTransition(activePair, { generating: true });
+
     try {
-      // Get base64 images for the pair
+      // Convert scene images to base64
       let startImageBase64 = '';
       let endImageBase64 = '';
 
-      // Try to fetch images and convert to base64
-      if (startScene?.generatedImageUrl) {
-        if (startScene.generatedImageUrl.startsWith('data:')) {
-          startImageBase64 = startScene.generatedImageUrl.split(',')[1];
-        } else {
-          try {
-            const resp = await fetch(startScene.generatedImageUrl);
-            const blob = await resp.blob();
-            startImageBase64 = await new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-              reader.readAsDataURL(blob);
-            });
-          } catch { /* continue without base64 */ }
-        }
+      if (!startScene?.generatedImageUrl) {
+        throw new Error(`Scene ${pair.startSceneIndex + 1} has no generated image`);
+      }
+      if (!endScene?.generatedImageUrl) {
+        throw new Error(`Scene ${pair.endSceneIndex + 1} has no generated image`);
       }
 
-      if (endScene?.generatedImageUrl) {
-        if (endScene.generatedImageUrl.startsWith('data:')) {
-          endImageBase64 = endScene.generatedImageUrl.split(',')[1];
-        } else {
-          try {
-            const resp = await fetch(endScene.generatedImageUrl);
-            const blob = await resp.blob();
-            endImageBase64 = await new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-              reader.readAsDataURL(blob);
-            });
-          } catch { /* continue without base64 */ }
-        }
-      }
+      startImageBase64 = await imageUrlToBase64(startScene.generatedImageUrl);
+      endImageBase64 = await imageUrlToBase64(endScene.generatedImageUrl);
 
       // Build enhanced prompt with motion settings
-      const enhancedPrompt = `${pair.motionPrompt}. Construction timelapse style, minimal motion, x${pair.speedMultiplier} speed. motionStrength:${pair.motionSettings.motionStrength}, continuity:${pair.motionSettings.continuityStrictness}%. Same bunker, same angle, same framing.`;
+      const presetLabel = MOTION_PRESETS.find(p => p.value === pair.motionPreset)?.label || 'Minimal Motion';
+      const enhancedPrompt = `${pair.motionPrompt}. Style: ${presetLabel}. Construction timelapse, x${pair.speedMultiplier} speed. Minimal camera movement. Same bunker structure, same camera angle, same framing. motionStrength:${pair.motionSettings.motionStrength}/100, realism:${pair.motionSettings.realismPriority}%, continuity:${pair.motionSettings.continuityStrictness}%. No dramatic effects, no morphing, no magical repair.`;
+
+      toast.info(`Generating transition ${activePair + 1}→${activePair + 2} via Veo. This may take 2-5 minutes…`);
 
       const result = await callVeo({
         prompt: enhancedPrompt,
@@ -96,24 +79,33 @@ export function PairTransitionStudio() {
         startImageBase64,
         endImageBase64: pair.frameMode === 'start-end' ? endImageBase64 : undefined,
         pairIndex: activePair,
-        projectName: name.replace(/\s+/g, '_'),
+        projectName: name.replace(/\s+/g, '_') || 'project',
       });
 
-      updateTransition(activePair, {
-        generating: false,
-        generatedVideoUrl: result.videoUrl,
-      });
-      toast.success(`Transition ${activePair + 1}→${activePair + 2} generated`);
+      if (result.videoUrl) {
+        updateTransition(activePair, {
+          generating: false,
+          generatedVideoUrl: result.videoUrl,
+        });
+        toast.success(`Transition ${activePair + 1}→${activePair + 2} complete`);
+      } else {
+        throw new Error(result.message || 'No video URL returned');
+      }
     } catch (err) {
       console.error('Transition generation failed:', err);
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setErrorMsg(msg);
       updateTransition(activePair, { generating: false });
-      toast.error(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast.error(`Transition failed: ${msg}`);
     }
   };
 
   const handleApprove = () => {
     updateTransition(activePair, { approved: true });
-    if (activePair < 7) setActivePair(activePair + 1);
+    if (activePair < 7) {
+      setActivePair(activePair + 1);
+      setErrorMsg(null);
+    }
   };
 
   const handleSpeedChange = (speed: SpeedMultiplier) => {
@@ -137,7 +129,7 @@ export function PairTransitionStudio() {
         {transitions.map((t, i) => (
           <button
             key={i}
-            onClick={() => setActivePair(i)}
+            onClick={() => { setActivePair(i); setErrorMsg(null); }}
             className={`
               shrink-0 px-3 h-9 rounded-md flex items-center justify-center text-xs font-bold transition-all
               ${i === activePair ? 'bg-primary text-primary-foreground' : ''}
@@ -152,6 +144,19 @@ export function PairTransitionStudio() {
         ))}
       </div>
 
+      {/* Error display */}
+      {errorMsg && (
+        <WorkshopCard className="border-destructive/40 bg-destructive/5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-destructive">Generation Failed</p>
+              <p className="text-xs text-destructive/80 font-mono mt-1 break-all">{errorMsg}</p>
+            </div>
+          </div>
+        </WorkshopCard>
+      )}
+
       {/* Signature Moment: Split view */}
       <div className="flex flex-col">
         {/* Start Image */}
@@ -163,7 +168,7 @@ export function PairTransitionStudio() {
           {startScene?.generatedImageUrl ? (
             <img src={startScene.generatedImageUrl} alt="Start" className="w-full rounded-md aspect-[9/16] object-cover" style={{ maxHeight: '160px', objectPosition: 'top' }} />
           ) : (
-            <div className="w-full aspect-[9/16] bg-secondary rounded-md" style={{ maxHeight: '160px' }} />
+            <div className="w-full aspect-[9/16] bg-secondary rounded-md flex items-center justify-center text-xs text-destructive" style={{ maxHeight: '160px' }}>No image</div>
           )}
         </WorkshopCard>
 
@@ -174,7 +179,10 @@ export function PairTransitionStudio() {
         `}>
           <div className="flex items-center gap-2">
             <div className="flex-1 h-[2px] bg-primary/60" />
-            <span className="text-xs font-bold text-primary uppercase tracking-widest">MOTION</span>
+            <span className="text-xs font-bold text-primary uppercase tracking-widest">
+              {pair.generating ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
+              MOTION
+            </span>
             <div className="flex-1 h-[2px] bg-primary/60" />
           </div>
           <details className="mt-2">
@@ -233,7 +241,7 @@ export function PairTransitionStudio() {
           {endScene?.generatedImageUrl ? (
             <img src={endScene.generatedImageUrl} alt="End" className="w-full rounded-md aspect-[9/16] object-cover" style={{ maxHeight: '160px', objectPosition: 'top' }} />
           ) : (
-            <div className="w-full aspect-[9/16] bg-secondary rounded-md" style={{ maxHeight: '160px' }} />
+            <div className="w-full aspect-[9/16] bg-secondary rounded-md flex items-center justify-center text-xs text-destructive" style={{ maxHeight: '160px' }}>No image</div>
           )}
         </WorkshopCard>
       </div>
@@ -242,15 +250,16 @@ export function PairTransitionStudio() {
       <WorkshopCard generating={pair.generating}>
         {pair.generatedVideoUrl ? (
           <div>
-            <div className="w-full aspect-[9/16] bg-surface-sunken rounded-md flex items-center justify-center mb-3 overflow-hidden" style={{ maxHeight: '300px' }}>
-              {pair.generatedVideoUrl.endsWith('.mp4') || pair.generatedVideoUrl.includes('supabase') ? (
-                <video src={pair.generatedVideoUrl} controls className="w-full h-full object-cover" />
-              ) : (
-                <Play className="w-12 h-12 text-primary/40" />
-              )}
+            <div className="w-full aspect-[9/16] bg-surface-sunken rounded-md overflow-hidden mb-3" style={{ maxHeight: '400px' }}>
+              <video
+                src={pair.generatedVideoUrl}
+                controls
+                playsInline
+                className="w-full h-full object-contain"
+              />
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleGenerate} className="flex-1 touch-target">
+              <Button variant="outline" size="sm" onClick={handleGenerate} disabled={pair.generating} className="flex-1 touch-target">
                 <RefreshCw className="w-4 h-4 mr-1" /> Regenerate
               </Button>
               <Button size="sm" onClick={handleApprove} disabled={pair.approved} className="flex-1 touch-target">
@@ -259,19 +268,29 @@ export function PairTransitionStudio() {
             </div>
           </div>
         ) : (
-          <Button
-            onClick={handleGenerate}
-            disabled={pair.generating}
-            className="w-full touch-target font-bold"
-          >
-            {pair.generating ? 'Generating via Veo…' : `Generate Transition ${activePair + 1}→${activePair + 2}`}
-          </Button>
+          <div>
+            <Button
+              onClick={handleGenerate}
+              disabled={pair.generating || !startScene?.generatedImageUrl || !endScene?.generatedImageUrl}
+              className="w-full touch-target font-bold"
+            >
+              {pair.generating ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Generating via Veo (2-5 min)…
+                </span>
+              ) : `Generate Transition ${activePair + 1}→${activePair + 2}`}
+            </Button>
+            {(!startScene?.generatedImageUrl || !endScene?.generatedImageUrl) && (
+              <p className="text-xs text-destructive mt-2 text-center">Both scene images required</p>
+            )}
+          </div>
         )}
 
         <div className="mt-3 p-2 rounded bg-secondary">
           <p className="text-[10px] text-muted-foreground">
             <span className="font-semibold">Frame Mode:</span> Start + End Frames (Guided).
-            Veo receives both frames as guidance. True exact end-frame matching depends on provider capability — this is honestly disclosed.
+            Veo receives both images as guidance. True exact end-frame matching is guided, not pixel-perfect — this is honestly disclosed.
           </p>
         </div>
       </WorkshopCard>

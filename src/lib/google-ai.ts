@@ -2,8 +2,6 @@ import { supabase } from '@/integrations/supabase/client';
 import type { QualityMode } from '@/types/project';
 import { getActiveModels } from '@/types/project';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-
 interface GeminiRequest {
   messages: { role: string; content: string }[];
   model?: string;
@@ -18,6 +16,12 @@ interface ImagenRequest {
   projectName: string;
 }
 
+interface ImagenResponse {
+  imageUrl: string;
+  imageBase64: string;
+  storagePath?: string;
+}
+
 interface VeoRequest {
   prompt: string;
   model?: string;
@@ -27,34 +31,92 @@ interface VeoRequest {
   projectName: string;
 }
 
+interface VeoResponse {
+  videoUrl?: string;
+  status: string;
+  operationName?: string;
+  message?: string;
+  storagePath?: string;
+}
+
 export async function callGemini({ messages, model, systemPrompt }: GeminiRequest): Promise<string> {
   const { data, error } = await supabase.functions.invoke('gemini-generate', {
     body: { messages, model, systemPrompt },
   });
 
   if (error) throw new Error(`Gemini error: ${error.message}`);
-  if (data.error) throw new Error(data.error);
+  if (data?.error) throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
   return data.text;
 }
 
-export async function callImagen(req: ImagenRequest): Promise<{ imageUrl: string; imageBase64: string }> {
+export async function callImagen(req: ImagenRequest): Promise<ImagenResponse> {
   const { data, error } = await supabase.functions.invoke('imagen-generate', {
     body: req,
   });
 
   if (error) throw new Error(`Imagen error: ${error.message}`);
-  if (data.error) throw new Error(data.error);
-  return { imageUrl: data.imageUrl || `data:image/png;base64,${data.imageBase64}`, imageBase64: data.imageBase64 };
+  if (data?.error) throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
+
+  const imageUrl = data.imageUrl || (data.imageBase64 ? `data:image/png;base64,${data.imageBase64}` : '');
+  if (!imageUrl && !data.imageBase64) throw new Error('No image returned from Imagen');
+
+  return {
+    imageUrl,
+    imageBase64: data.imageBase64,
+    storagePath: data.storagePath,
+  };
 }
 
-export async function callVeo(req: VeoRequest): Promise<{ videoUrl: string; status: string }> {
-  const { data, error } = await supabase.functions.invoke('veo-generate', {
-    body: req,
+export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
+  // Step 1: Start the operation
+  const { data: startData, error: startError } = await supabase.functions.invoke('veo-generate', {
+    body: { ...req, mode: 'start' },
   });
 
-  if (error) throw new Error(`Veo error: ${error.message}`);
-  if (data.error) throw new Error(data.error);
-  return { videoUrl: data.videoUrl, status: data.status };
+  if (startError) throw new Error(`Veo error: ${startError.message}`);
+  if (startData?.error) throw new Error(`${startData.error}${startData.details ? ': ' + startData.details : ''}`);
+
+  if (startData.status !== 'started' || !startData.operationName) {
+    throw new Error(startData.error || 'Failed to start Veo operation');
+  }
+
+  const operationName = startData.operationName;
+
+  // Step 2: Poll for completion (client-side polling, each poll is a short edge function call)
+  const maxPolls = 60; // 60 * 5s = 5 minutes
+  const pollInterval = 5000; // 5 seconds
+
+  for (let i = 0; i < maxPolls; i++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    const { data: pollData, error: pollError } = await supabase.functions.invoke('veo-generate', {
+      body: {
+        mode: 'poll',
+        operationName,
+        projectName: req.projectName,
+        pairIndex: req.pairIndex,
+      },
+    });
+
+    if (pollError) {
+      console.warn(`Poll ${i + 1} error:`, pollError.message);
+      continue; // Retry on poll errors
+    }
+
+    if (pollData?.done) {
+      if (pollData.status === 'error') {
+        throw new Error(pollData.error || 'Veo generation failed');
+      }
+      return {
+        videoUrl: pollData.videoUrl || pollData.videoUri,
+        status: 'complete',
+        operationName,
+        storagePath: pollData.storagePath,
+      };
+    }
+  }
+
+  throw new Error(`Video generation timed out after 5 minutes. Operation: ${operationName}`);
 }
 
 export function getImageModel(quality: QualityMode): string {
@@ -69,4 +131,32 @@ export function getVideoModel(quality: QualityMode): string {
 
 export function getPlanningModel(quality: QualityMode): string {
   return quality === 'fast' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
+}
+
+/**
+ * Convert a storage URL or data URL to base64 string.
+ * Used for chaining scene images as references.
+ */
+export async function imageUrlToBase64(url: string): Promise<string> {
+  if (url.startsWith('data:')) {
+    return url.split(',')[1];
+  }
+
+  // For storage URLs, fetch through a proxy or re-download
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch image');
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        resolve(result.split(',')[1]);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    throw new Error('Cannot convert image to base64 for reference chaining');
+  }
 }
