@@ -137,6 +137,58 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
   throw new Error(`Video generation timed out after 5 minutes. Operation: ${operationName}`);
 }
 
+export async function callKling(req: KlingRequest): Promise<KlingResponse> {
+  // Step 1: Start the task
+  const { data: startData, error: startError } = await supabase.functions.invoke('kling-generate', {
+    body: { ...req, mode: 'start' },
+  });
+
+  if (startError) throw new Error(`Kling error: ${startError.message}`);
+  if (startData?.error) throw new Error(`${startData.error}`);
+
+  if (startData.status !== 'started' || !startData.taskId) {
+    throw new Error(startData.error || 'Failed to start Kling task');
+  }
+
+  const taskId = startData.taskId;
+
+  // Step 2: Poll for completion
+  const maxPolls = 120; // 120 * 5s = 10 minutes (Kling can be slower)
+  const pollInterval = 5000;
+
+  for (let i = 0; i < maxPolls; i++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    const { data: pollData, error: pollError } = await supabase.functions.invoke('kling-generate', {
+      body: {
+        mode: 'poll',
+        taskId,
+        projectName: req.projectName,
+        pairIndex: req.pairIndex,
+      },
+    });
+
+    if (pollError) {
+      console.warn(`Kling poll ${i + 1} error:`, pollError.message);
+      continue;
+    }
+
+    if (pollData?.done) {
+      if (pollData.status === 'error') {
+        throw new Error(pollData.error || 'Kling generation failed');
+      }
+      return {
+        videoUrl: pollData.videoUrl,
+        status: 'complete',
+        taskId,
+        storagePath: pollData.storagePath,
+      };
+    }
+  }
+
+  throw new Error(`Kling video generation timed out after 10 minutes. Task: ${taskId}`);
+}
+
 export function getImageModel(quality: QualityMode): string {
   const models = getActiveModels(quality);
   return models.image;
