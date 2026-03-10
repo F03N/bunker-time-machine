@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { QualityMode } from '@/types/project';
+import type { QualityMode, VideoProvider } from '@/types/project';
 import { getActiveModels } from '@/types/project';
 
 interface GeminiRequest {
