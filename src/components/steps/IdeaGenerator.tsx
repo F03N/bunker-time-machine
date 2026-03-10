@@ -4,50 +4,38 @@ import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import type { BunkerIdea } from '@/types/project';
 import { MapPin, Clock, Eye } from 'lucide-react';
-
-const MOCK_IDEAS: BunkerIdea[] = Array.from({ length: 10 }, (_, i) => ({
-  id: i,
-  title: [
-    'Soviet Arctic Command Post', 'Swiss Alpine Fallout Shelter', 'East German Border Watchtower Bunker',
-    'Yugoslav Mountain Artillery Fortress', 'British WWII Coastal Defense', 'Czech Cold War Nuclear Shelter',
-    'Norwegian NATO Communications Vault', 'Albanian Underground Air Base', 'Finnish Winter War Dugout',
-    'French Maginot Line Outpost',
-  ][i],
-  location: ['Murmansk, Russia', 'Bernese Alps, Switzerland', 'Thuringia, Germany', 'Montenegro', 'Dover, England', 'Brno, Czechia', 'Tromsø, Norway', 'Gjadër, Albania', 'Summa, Finland', 'Alsace, France'][i],
-  era: ['1960s', '1970s', '1950s', '1940s', '1940s', '1960s', '1980s', '1970s', '1939', '1930s'][i],
-  description: [
-    'A heavily reinforced polar command post buried beneath permafrost, featuring blast doors and a collapsed communications array.',
-    'A civilian fallout shelter carved into limestone, with intact ventilation systems and decaying supply caches.',
-    'A concrete watchtower bunker along the former inner-German border, overgrown with decades of vegetation.',
-    'A massive mountain fortress with artillery positions overlooking the Adriatic coast.',
-    'A chalk-cliff defense position with gun emplacements and underground tunnels.',
-    'A multi-level nuclear shelter beneath a residential block, designed for 500 civilians.',
-    'A hardened NATO signals facility inside a mountain, with EMP-shielded electronics bays.',
-    'A former MiG fighter base hidden inside a mountain with massive hangar doors.',
-    'A timber-reinforced field bunker from the Winter War, partially collapsed under snow.',
-    'A reinforced Maginot fortress with retractable turrets and underground rail connections.',
-  ][i],
-  visualHook: [
-    'Frost-covered blast doors emerging from snow', 'Pristine limestone walls vs. rusted equipment',
-    'Nature reclaiming brutalist concrete', 'Mediterranean light through artillery slits',
-    'White chalk cliffs with dark gun ports', 'Domestic apartment above, bunker below',
-    'Arctic wilderness outside, hi-tech inside', 'MiG silhouettes in dark hangars',
-    'Snow and timber in golden winter light', 'Art deco military engineering',
-  ][i],
-}));
+import { callGemini, getPlanningModel } from '@/lib/google-ai';
+import { MASTER_SYSTEM_PROMPT, getIdeaGenerationPrompt } from '@/lib/prompts';
+import { toast } from 'sonner';
 
 export function IdeaGenerator() {
-  const { ideas, setIdeas, selectedIdeaIndex, selectIdea, goToNextStep, goToPrevStep } = useProjectStore();
+  const { ideas, setIdeas, selectedIdeaIndex, selectIdea, goToNextStep, goToPrevStep, qualityMode } = useProjectStore();
   const [generating, setGenerating] = useState(false);
   const displayIdeas = ideas.length > 0 ? ideas : [];
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setGenerating(true);
-    // Simulate generation
-    setTimeout(() => {
-      setIdeas(MOCK_IDEAS);
+    try {
+      const text = await callGemini({
+        messages: [{ role: 'user', content: getIdeaGenerationPrompt() }],
+        model: getPlanningModel(qualityMode),
+        systemPrompt: MASTER_SYSTEM_PROMPT,
+      });
+
+      // Parse JSON from response (handle potential markdown wrapping)
+      let cleanText = text.trim();
+      if (cleanText.startsWith('```')) {
+        cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+      const parsed: BunkerIdea[] = JSON.parse(cleanText);
+      setIdeas(parsed);
+      toast.success('Generated 10 bunker concepts');
+    } catch (err) {
+      console.error('Idea generation failed:', err);
+      toast.error(`Generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
       setGenerating(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -61,7 +49,7 @@ export function IdeaGenerator() {
         <WorkshopCard generating={generating}>
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-4 text-sm">
-              {generating ? 'Generating 10 bunker concepts…' : 'Ready to generate concepts from master prompt.'}
+              {generating ? 'Generating 10 bunker concepts via Gemini…' : 'Ready to generate concepts from master prompt.'}
             </p>
             {!generating && (
               <button
@@ -79,7 +67,7 @@ export function IdeaGenerator() {
             <button
               key={idea.id}
               onClick={() => selectIdea(idx)}
-              className={`text-left transition-all ${selectedIdeaIndex === idx ? '' : ''}`}
+              className="text-left transition-all"
             >
               <WorkshopCard className={selectedIdeaIndex === idx ? 'border-primary ring-1 ring-primary/30' : ''}>
                 <div className="flex items-start gap-3">

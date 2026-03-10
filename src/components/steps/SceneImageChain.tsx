@@ -3,21 +3,46 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
-import { Check, RefreshCw, ArrowRight, ImageIcon } from 'lucide-react';
+import { Check, RefreshCw, ImageIcon } from 'lucide-react';
+import { callImagen, getImageModel } from '@/lib/google-ai';
+import { toast } from 'sonner';
 
 export function SceneImageChain() {
-  const { scenes, updateScene, goToNextStep, goToPrevStep } = useProjectStore();
+  const { scenes, updateScene, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
   const [activeScene, setActiveScene] = useState(0);
 
-  const handleGenerate = (idx: number) => {
+  const handleGenerate = async (idx: number) => {
     updateScene(idx, { generating: true });
-    // Simulate image generation
-    setTimeout(() => {
+    try {
+      const prevScene = idx > 0 ? scenes[idx - 1] : null;
+      let referenceImageBase64: string | undefined;
+
+      // If previous scene has a generated image, fetch its base64 for reference
+      if (prevScene?.generatedImageUrl && prevScene.generatedImageUrl.startsWith('data:')) {
+        referenceImageBase64 = prevScene.generatedImageUrl.split(',')[1];
+      }
+
+      const result = await callImagen({
+        prompt: scenes[idx].imagePrompt,
+        model: getImageModel(qualityMode),
+        referenceImageBase64,
+        sceneIndex: idx,
+        projectName: name.replace(/\s+/g, '_'),
+      });
+
       updateScene(idx, {
         generating: false,
-        generatedImageUrl: `https://placehold.co/720x1280/1C1C1E/FFC700?text=Scene+${idx + 1}%0A${encodeURIComponent(scenes[idx].title)}`,
+        generatedImageUrl: result.imageUrl,
       });
-    }, 2000);
+
+      // Store base64 in a hidden field for chaining to next scene
+      (scenes[idx] as any)._base64 = result.imageBase64;
+      toast.success(`Scene ${idx + 1} generated`);
+    } catch (err) {
+      console.error(`Scene ${idx + 1} generation failed:`, err);
+      updateScene(idx, { generating: false });
+      toast.error(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const handleApprove = (idx: number) => {
@@ -33,7 +58,7 @@ export function SceneImageChain() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Scene Image Chain</h1>
-        <p className="text-sm text-muted-foreground">Generate images sequentially. Each uses the previous as reference.</p>
+        <p className="text-sm text-muted-foreground">Generate images via Imagen. Each uses the previous as reference.</p>
       </div>
 
       {/* Scene selector strip */}
@@ -128,7 +153,7 @@ export function SceneImageChain() {
               disabled={currentScene.generating || (activeScene > 0 && !prevScene?.approved)}
               className="touch-target"
             >
-              {currentScene.generating ? 'Generating…' : `Generate Scene ${activeScene + 1}`}
+              {currentScene.generating ? 'Generating via Imagen…' : `Generate Scene ${activeScene + 1}`}
             </Button>
             {activeScene > 0 && !prevScene?.approved && (
               <p className="text-xs text-destructive mt-2">Approve Scene {activeScene} first</p>
@@ -136,7 +161,6 @@ export function SceneImageChain() {
           </div>
         )}
 
-        {/* Prompt info collapsed */}
         <details className="mt-3">
           <summary className="text-xs text-muted-foreground cursor-pointer">View prompt details</summary>
           <div className="mt-2 space-y-2">

@@ -2,38 +2,48 @@ import { useState } from 'react';
 import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
-import { SCENE_TITLES } from '@/types/project';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { callGemini, getPlanningModel } from '@/lib/google-ai';
+import { MASTER_SYSTEM_PROMPT, getScenePlanPrompt } from '@/lib/prompts';
+import { toast } from 'sonner';
 
 export function ScenePlan() {
-  const { scenes, setScenes, selectedIdeaIndex, ideas, goToNextStep, goToPrevStep } = useProjectStore();
+  const { scenes, setScenes, selectedIdeaIndex, ideas, goToNextStep, goToPrevStep, qualityMode } = useProjectStore();
   const [generating, setGenerating] = useState(false);
   const selectedIdea = selectedIdeaIndex !== null ? ideas[selectedIdeaIndex] : null;
   const hasPrompts = scenes.some(s => s.imagePrompt.length > 0);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
+    if (!selectedIdea) return;
     setGenerating(true);
-    setTimeout(() => {
-      const generated = scenes.map((s, i) => ({
+    try {
+      const text = await callGemini({
+        messages: [{ role: 'user', content: getScenePlanPrompt(selectedIdea.title, selectedIdea.description) }],
+        model: getPlanningModel(qualityMode),
+        systemPrompt: MASTER_SYSTEM_PROMPT,
+      });
+
+      let cleanText = text.trim();
+      if (cleanText.startsWith('```')) {
+        cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+      const parsed = JSON.parse(cleanText);
+      const updated = scenes.map((s, i) => ({
         ...s,
-        imagePrompt: `Photorealistic view of ${selectedIdea?.title || 'bunker'}. Scene ${i + 1}: ${SCENE_TITLES[i]}. ${selectedIdea?.description || ''}. Highly detailed architectural photography, 9:16 vertical composition, natural lighting, construction timelapse style. ${i === 0 ? 'Abandoned, deteriorated state.' : i < 4 ? 'Exterior restoration in progress with workers and equipment visible.' : i < 8 ? 'Interior renovation with tools, dust, and construction materials.' : 'Fully restored, magazine-quality interior design reveal.'}`,
-        motionPrompt: [
-          'Slow pan across deteriorated exterior, dust particles in air',
-          'Camera slowly approaches entrance, slight wind movement',
-          'Workers begin exterior repairs, subtle tool movements',
-          'Near-complete exterior, fresh materials settling',
-          'Camera enters through doorway, light shift from exterior to interior',
-          'Interior work underway, sparks from welding, dust in light beams',
-          'Final interior touches, smooth surfaces, clean lines appearing',
-          'Design elements placed, warm lighting activating',
-          'Full reveal, camera slowly pans finished space, golden hour light',
-        ][i],
-        narration: `Scene ${i + 1}: ${SCENE_TITLES[i]}. ${['We discover this forgotten structure in its raw state.', 'Our team arrives on site, assessing the scope of work ahead.', 'Exterior restoration begins — concrete repair and structural reinforcement.', 'The exterior transformation nears completion.', 'We cross the threshold into the underground space.', 'Interior demolition and reconstruction is underway.', 'Fine finishing work transforms raw surfaces into livable space.', 'The interior design vision comes to life.', 'The final reveal — from ruin to refuge.'][i]}`,
-        notes: `Maintain exact camera position. ${i > 0 ? 'Use previous scene image as structural reference.' : 'Establish primary camera angle and framing.'} ${i >= 2 && i <= 7 ? 'Workers/tools must be visible for any structural change.' : ''}`,
+        title: parsed[i]?.title || s.title,
+        imagePrompt: parsed[i]?.imagePrompt || '',
+        motionPrompt: parsed[i]?.motionPrompt || '',
+        narration: parsed[i]?.narration || '',
+        notes: parsed[i]?.notes || '',
       }));
-      setScenes(generated);
+      setScenes(updated);
+      toast.success('Generated 9-scene plan');
+    } catch (err) {
+      console.error('Scene plan generation failed:', err);
+      toast.error(`Generation failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
       setGenerating(false);
-    }, 2000);
+    }
   };
 
   return (
@@ -49,7 +59,7 @@ export function ScenePlan() {
         <WorkshopCard generating={generating}>
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-4 text-sm">
-              {generating ? 'Generating 9 scene prompts and narration…' : 'Generate the complete scene plan.'}
+              {generating ? 'Generating 9 scene prompts via Gemini…' : 'Generate the complete scene plan.'}
             </p>
             {!generating && (
               <button

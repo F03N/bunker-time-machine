@@ -3,38 +3,57 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { callGemini, getPlanningModel } from '@/lib/google-ai';
+import { MASTER_SYSTEM_PROMPT, getAudioPlanPrompt } from '@/lib/prompts';
+import { toast } from 'sonner';
 
 export function AudioVoiceover() {
-  const { scenes, audio, setAudio, goToNextStep, goToPrevStep } = useProjectStore();
+  const { scenes, audio, setAudio, goToNextStep, goToPrevStep, qualityMode } = useProjectStore();
   const [generating, setGenerating] = useState(false);
   const hasScript = audio.fullScript.length > 0;
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setGenerating(true);
-    setTimeout(() => {
+    try {
+      const text = await callGemini({
+        messages: [{ role: 'user', content: getAudioPlanPrompt(scenes.map(s => ({ title: s.title, narration: s.narration }))) }],
+        model: getPlanningModel(qualityMode),
+        systemPrompt: MASTER_SYSTEM_PROMPT,
+      });
+
+      let cleanText = text.trim();
+      if (cleanText.startsWith('```')) {
+        cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+      const parsed = JSON.parse(cleanText);
       setAudio({
-        fullScript: scenes.map((s, i) => `[Scene ${i + 1}: ${s.title}]\n${s.narration}`).join('\n\n'),
-        sceneNarrations: scenes.map(s => s.narration),
-        ambienceNotes: scenes.map((_, i) => i < 4 ? 'Wind, distant birds, crunching gravel' : i < 8 ? 'Echo, dripping water, power tools' : 'Warm ambient hum, soft music'),
-        sfxNotes: scenes.map((_, i) => i === 0 ? 'Creaking metal door' : i < 4 ? 'Hammer strikes, concrete mixing' : i < 8 ? 'Welding sparks, drill sounds' : 'Light switch click, appliance hum'),
+        fullScript: parsed.fullScript || '',
+        sceneNarrations: parsed.sceneNarrations || [],
+        ambienceNotes: parsed.ambienceNotes || [],
+        sfxNotes: parsed.sfxNotes || [],
         ttsReady: true,
       });
+      toast.success('Generated audio plan');
+    } catch (err) {
+      console.error('Audio generation failed:', err);
+      toast.error(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
       setGenerating(false);
-    }, 1500);
+    }
   };
 
   return (
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Audio / Voiceover</h1>
-        <p className="text-sm text-muted-foreground">Generate narration script, ambience notes, and SFX cues.</p>
+        <p className="text-sm text-muted-foreground">Generate narration script, ambience notes, and SFX cues via Gemini.</p>
       </div>
 
       {!hasScript ? (
         <WorkshopCard generating={generating}>
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-4 text-sm">
-              {generating ? 'Generating voiceover script…' : 'Generate full audio plan for all 9 scenes.'}
+              {generating ? 'Generating voiceover script via Gemini…' : 'Generate full audio plan for all 9 scenes.'}
             </p>
             {!generating && (
               <button

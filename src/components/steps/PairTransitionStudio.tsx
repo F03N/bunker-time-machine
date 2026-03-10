@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { DEFAULT_MOTION_SETTINGS } from '@/types/project';
 import type { TransitionPair, SpeedMultiplier, MotionPreset } from '@/types/project';
 import { Check, Play, RefreshCw } from 'lucide-react';
+import { callVeo, getVideoModel } from '@/lib/google-ai';
+import { toast } from 'sonner';
 
 const MOTION_PRESETS: { value: MotionPreset; label: string }[] = [
   { value: 'strict-frame-match', label: 'Strict Frame Match' },
@@ -18,7 +20,7 @@ const MOTION_PRESETS: { value: MotionPreset; label: string }[] = [
 const SPEEDS: SpeedMultiplier[] = [1, 2, 3, 4];
 
 export function PairTransitionStudio() {
-  const { scenes, transitions, setTransitions, updateTransition, goToNextStep, goToPrevStep } = useProjectStore();
+  const { scenes, transitions, setTransitions, updateTransition, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
   const [activePair, setActivePair] = useState(0);
 
   useEffect(() => {
@@ -45,14 +47,68 @@ export function PairTransitionStudio() {
   const startScene = scenes[pair.startSceneIndex];
   const endScene = scenes[pair.endSceneIndex];
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     updateTransition(activePair, { generating: true });
-    setTimeout(() => {
+    try {
+      // Get base64 images for the pair
+      let startImageBase64 = '';
+      let endImageBase64 = '';
+
+      // Try to fetch images and convert to base64
+      if (startScene?.generatedImageUrl) {
+        if (startScene.generatedImageUrl.startsWith('data:')) {
+          startImageBase64 = startScene.generatedImageUrl.split(',')[1];
+        } else {
+          try {
+            const resp = await fetch(startScene.generatedImageUrl);
+            const blob = await resp.blob();
+            startImageBase64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+              reader.readAsDataURL(blob);
+            });
+          } catch { /* continue without base64 */ }
+        }
+      }
+
+      if (endScene?.generatedImageUrl) {
+        if (endScene.generatedImageUrl.startsWith('data:')) {
+          endImageBase64 = endScene.generatedImageUrl.split(',')[1];
+        } else {
+          try {
+            const resp = await fetch(endScene.generatedImageUrl);
+            const blob = await resp.blob();
+            endImageBase64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+              reader.readAsDataURL(blob);
+            });
+          } catch { /* continue without base64 */ }
+        }
+      }
+
+      // Build enhanced prompt with motion settings
+      const enhancedPrompt = `${pair.motionPrompt}. Construction timelapse style, minimal motion, x${pair.speedMultiplier} speed. motionStrength:${pair.motionSettings.motionStrength}, continuity:${pair.motionSettings.continuityStrictness}%. Same bunker, same angle, same framing.`;
+
+      const result = await callVeo({
+        prompt: enhancedPrompt,
+        model: getVideoModel(qualityMode),
+        startImageBase64,
+        endImageBase64: pair.frameMode === 'start-end' ? endImageBase64 : undefined,
+        pairIndex: activePair,
+        projectName: name.replace(/\s+/g, '_'),
+      });
+
       updateTransition(activePair, {
         generating: false,
-        generatedVideoUrl: 'placeholder-video',
+        generatedVideoUrl: result.videoUrl,
       });
-    }, 3000);
+      toast.success(`Transition ${activePair + 1}→${activePair + 2} generated`);
+    } catch (err) {
+      console.error('Transition generation failed:', err);
+      updateTransition(activePair, { generating: false });
+      toast.error(`Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const handleApprove = () => {
@@ -73,7 +129,7 @@ export function PairTransitionStudio() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Pair Transition Studio</h1>
-        <p className="text-sm text-muted-foreground">Generate transitions pair by pair. Start + End frames + motion.</p>
+        <p className="text-sm text-muted-foreground">Generate transitions via Veo. Pair by pair. Start + End frames.</p>
       </div>
 
       {/* Pair selector */}
@@ -186,8 +242,12 @@ export function PairTransitionStudio() {
       <WorkshopCard generating={pair.generating}>
         {pair.generatedVideoUrl ? (
           <div>
-            <div className="w-full aspect-[9/16] bg-surface-sunken rounded-md flex items-center justify-center mb-3" style={{ maxHeight: '300px' }}>
-              <Play className="w-12 h-12 text-primary/40" />
+            <div className="w-full aspect-[9/16] bg-surface-sunken rounded-md flex items-center justify-center mb-3 overflow-hidden" style={{ maxHeight: '300px' }}>
+              {pair.generatedVideoUrl.endsWith('.mp4') || pair.generatedVideoUrl.includes('supabase') ? (
+                <video src={pair.generatedVideoUrl} controls className="w-full h-full object-cover" />
+              ) : (
+                <Play className="w-12 h-12 text-primary/40" />
+              )}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={handleGenerate} className="flex-1 touch-target">
@@ -204,15 +264,14 @@ export function PairTransitionStudio() {
             disabled={pair.generating}
             className="w-full touch-target font-bold"
           >
-            {pair.generating ? 'Generating Transition…' : `Generate Transition ${activePair + 1}→${activePair + 2}`}
+            {pair.generating ? 'Generating via Veo…' : `Generate Transition ${activePair + 1}→${activePair + 2}`}
           </Button>
         )}
 
-        {/* Frame mode disclosure */}
         <div className="mt-3 p-2 rounded bg-secondary">
           <p className="text-[10px] text-muted-foreground">
             <span className="font-semibold">Frame Mode:</span> Start + End Frames (Guided).
-            The video model receives both frames as guidance. True exact end-frame matching depends on provider capability.
+            Veo receives both frames as guidance. True exact end-frame matching depends on provider capability — this is honestly disclosed.
           </p>
         </div>
       </WorkshopCard>
