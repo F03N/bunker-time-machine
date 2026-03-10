@@ -3,6 +3,8 @@ import type { ProjectState, WorkflowStep, QualityMode, BunkerIdea, SceneData, Tr
 import { SCENE_TITLES } from '@/types/project';
 
 interface ProjectStore extends ProjectState {
+  projectId: string | null;
+  setProjectId: (id: string | null) => void;
   setName: (name: string) => void;
   setReferenceNotes: (notes: string) => void;
   setQualityMode: (mode: QualityMode) => void;
@@ -17,7 +19,9 @@ interface ProjectStore extends ProjectState {
   updateTransition: (index: number, updates: Partial<TransitionPair>) => void;
   setAudio: (audio: Partial<AudioData>) => void;
   setContinuityFlags: (flags: ContinuityFlag[]) => void;
+  loadState: (state: ProjectState) => void;
   resetProject: () => void;
+  getState: () => ProjectState;
 }
 
 const initialScenes: SceneData[] = SCENE_TITLES.map((title, i) => ({
@@ -50,9 +54,11 @@ const initialState: ProjectState = {
   continuityFlags: [],
 };
 
-export const useProjectStore = create<ProjectStore>((set) => ({
+export const useProjectStore = create<ProjectStore>((set, get) => ({
   ...initialState,
+  projectId: null,
 
+  setProjectId: (id) => set({ projectId: id }),
   setName: (name) => set({ name }),
   setReferenceNotes: (notes) => set({ referenceNotes: notes }),
   setQualityMode: (mode) => set({ qualityMode: mode }),
@@ -85,5 +91,23 @@ export const useProjectStore = create<ProjectStore>((set) => ({
 
   setContinuityFlags: (flags) => set({ continuityFlags: flags }),
 
-  resetProject: () => set(initialState),
+  loadState: (state) => set({ ...state }),
+
+  resetProject: () => set({ ...initialState, projectId: null }),
+
+  getState: () => {
+    const s = get();
+    return {
+      name: s.name,
+      referenceNotes: s.referenceNotes,
+      qualityMode: s.qualityMode,
+      currentStep: s.currentStep,
+      ideas: s.ideas,
+      selectedIdeaIndex: s.selectedIdeaIndex,
+      scenes: s.scenes,
+      transitions: s.transitions,
+      audio: s.audio,
+      continuityFlags: s.continuityFlags,
+    };
+  },
 }));
