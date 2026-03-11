@@ -6,15 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Check, RefreshCw, ImageIcon, AlertTriangle } from 'lucide-react';
 import { callImagen, getImageModel, imageUrlToBase64 } from '@/lib/google-ai';
 import { getWorkerPromptInstruction } from '@/types/project';
+import { getStructuralAnchor } from '@/lib/prompts';
 import { toast } from 'sonner';
 
 export function SceneImageChain() {
-  const { scenes, updateScene, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
+  const { scenes, updateScene, goToNextStep, goToPrevStep, qualityMode, name, selectedIdeaIndex, ideas } = useProjectStore();
   const [activeScene, setActiveScene] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Store base64 data per scene for chaining (in-memory only, not persisted)
   const [sceneBase64, setSceneBase64] = useState<Record<number, string>>({});
+
+  const ideaTitle = selectedIdeaIndex !== null && ideas[selectedIdeaIndex]
+    ? ideas[selectedIdeaIndex].title
+    : name;
 
   const handleGenerate = async (idx: number) => {
     setErrorMsg(null);
@@ -23,14 +26,11 @@ export function SceneImageChain() {
     try {
       let referenceImageBase64: string | undefined;
 
-      // Chain from previous scene
       if (idx > 0) {
         const prevScene = scenes[idx - 1];
         if (!prevScene.approved || !prevScene.generatedImageUrl) {
           throw new Error(`Scene ${idx} must be approved first`);
         }
-
-        // Use stored base64 if available, otherwise convert from URL
         if (sceneBase64[idx - 1]) {
           referenceImageBase64 = sceneBase64[idx - 1];
         } else if (prevScene.generatedImageUrl) {
@@ -38,11 +38,15 @@ export function SceneImageChain() {
         }
       }
 
-      // Inject scene-aware worker cues into the actual prompt
+      // Build the full prompt: base + worker cues + structural anchor
       const workerInstruction = getWorkerPromptInstruction(idx);
-      const fullPrompt = workerInstruction
-        ? `${scenes[idx].imagePrompt}\n\n${workerInstruction}`
-        : scenes[idx].imagePrompt;
+      const structuralAnchor = getStructuralAnchor(idx, ideaTitle);
+      
+      let fullPrompt = scenes[idx].imagePrompt;
+      if (workerInstruction) {
+        fullPrompt += `\n\n${workerInstruction}`;
+      }
+      fullPrompt += structuralAnchor;
 
       const result = await callImagen({
         prompt: fullPrompt,
@@ -52,7 +56,6 @@ export function SceneImageChain() {
         projectName: name.replace(/\s+/g, '_') || 'project',
       });
 
-      // Store base64 for chaining to next scene
       if (result.imageBase64) {
         setSceneBase64(prev => ({ ...prev, [idx]: result.imageBase64 }));
       }
