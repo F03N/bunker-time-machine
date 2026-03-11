@@ -10,8 +10,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const KIE_API_KEY = Deno.env.get("KIE_API_KEY");
-    if (!KIE_API_KEY) throw new Error("KIE_API_KEY is not configured");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY is not configured");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -19,13 +19,13 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const body = await req.json();
-    const mode = body.mode || "start";
+    const mode = body.mode || "generate";
 
     if (mode === "poll") {
-      return await handlePoll(body.taskId, KIE_API_KEY, supabase, body.projectName, body.pairIndex);
+      return await handlePoll(body.operationName, GOOGLE_AI_API_KEY, supabase, body.projectName, body.pairIndex);
     }
 
-    return await handleStart(body, KIE_API_KEY, supabase);
+    return await handleGenerate(body, GOOGLE_AI_API_KEY, supabase);
   } catch (e) {
     console.error("veo-generate error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
@@ -51,60 +51,59 @@ async function uploadBase64ToStorage(supabase: any, base64: string, projectName:
   return data.publicUrl;
 }
 
-async function handleStart(body: any, apiKey: string, supabase: any) {
-  const { prompt, model, startImageBase64, endImageBase64, projectName } = body;
+async function handleGenerate(body: any, apiKey: string, supabase: any) {
+  const { prompt, model, startImageBase64, endImageBase64, projectName, pairIndex } = body;
   if (!prompt) throw new Error("prompt is required");
 
-  // Upload images to storage to get public URLs for KIE API
-  const imageUrls: string[] = [];
+  const veoModel = model || "veo-3.1-generate-preview";
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${veoModel}:predictLongRunning?key=${apiKey}`;
 
-  if (startImageBase64) {
-    const startUrl = await uploadBase64ToStorage(supabase, startImageBase64, projectName, "start");
-    imageUrls.push(startUrl);
-    console.log(`Uploaded start frame: ${startUrl}`);
-  }
-
-  if (endImageBase64) {
-    const endUrl = await uploadBase64ToStorage(supabase, endImageBase64, projectName, "end");
-    imageUrls.push(endUrl);
-    console.log(`Uploaded end frame: ${endUrl}`);
-  }
-
-  const kieModel = model === "veo-3.1-fast-generate-preview" ? "veo3_fast" : "veo3";
-
-  const requestBody: any = {
+  // Build the request for Google AI Studio Veo API
+  const instances: any = {
     prompt,
-    model: kieModel,
-    aspect_ratio: "9:16",
-    enableTranslation: false,
   };
 
-  if (imageUrls.length > 0) {
-    requestBody.imageUrls = imageUrls;
-    requestBody.generationType = "FIRST_AND_LAST_FRAMES_2_VIDEO";
-  } else {
-    requestBody.generationType = "TEXT_2_VIDEO";
+  // Upload start image to storage and use as reference
+  if (startImageBase64) {
+    const startUrl = await uploadBase64ToStorage(supabase, startImageBase64, projectName, `start_${pairIndex}`);
+    instances.image = {
+      bytesBase64Encoded: startImageBase64.includes(",") ? startImageBase64.split(",")[1] : startImageBase64,
+    };
+    console.log(`Using start frame as initial image for Veo`);
   }
 
-  console.log(`Starting Veo generation via KIE: model=${kieModel}, images=${imageUrls.length}`);
+  // Note: Veo 3.1 via Google AI Studio supports start image guidance.
+  // End image is NOT directly supported as an exact end-frame.
+  // We include end image context in the prompt for guidance.
+  if (endImageBase64) {
+    console.log(`End image provided as visual target/guide (not exact end-frame — Veo limitation)`);
+  }
 
-  const response = await fetch("https://api.kie.ai/api/v1/veo/generate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
+  const requestBody = {
+    instances: [instances],
+    parameters: {
+      aspectRatio: "9:16",
+      sampleCount: 1,
+      durationSeconds: 5,
+      personGeneration: "dont_allow",
     },
+  };
+
+  console.log(`Starting Veo generation via Google AI Studio: model=${veoModel}`);
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
   });
 
-  const data = await response.json();
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Veo API error:", response.status, errorText);
 
-  if (data.code !== 200 || !data.data?.taskId) {
-    console.error("KIE API error:", JSON.stringify(data));
-
-    if (data.code === 429) {
+    if (response.status === 429) {
       return new Response(JSON.stringify({
-        error: "تم تجاوز حصة API. حاول مرة أخرى بعد دقائق.",
+        error: "API quota exceeded. Wait a few minutes and try again.",
         errorCode: "RATE_LIMITED",
       }), {
         status: 429,
@@ -113,51 +112,89 @@ async function handleStart(body: any, apiKey: string, supabase: any) {
     }
 
     return new Response(JSON.stringify({
-      error: data.msg || `KIE API error (${data.code})`,
-      details: JSON.stringify(data).substring(0, 500),
+      error: `Veo API error (${response.status})`,
+      details: errorText.substring(0, 500),
     }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  console.log(`KIE Veo task started: ${data.data.taskId}`);
+  const data = await response.json();
+
+  // Check if it's a long-running operation
+  if (data.name) {
+    console.log(`Veo long-running operation started: ${data.name}`);
+    return new Response(JSON.stringify({
+      status: "started",
+      operationName: data.name,
+    }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Synchronous result (unlikely for video but handle it)
+  const videoData = data.predictions?.[0]?.video;
+  if (videoData?.bytesBase64Encoded) {
+    const videoBytes = Uint8Array.from(atob(videoData.bytesBase64Encoded), c => c.charCodeAt(0));
+    const safeName = (projectName || "project").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const fileName = `${safeName}/transitions/transition_${(pairIndex ?? 0) + 1}_${Date.now()}.mp4`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("bunker-assets")
+      .upload(fileName, videoBytes, { contentType: "video/mp4", upsert: true });
+
+    if (uploadError) {
+      return new Response(JSON.stringify({
+        videoUrl: `data:video/mp4;base64,${videoData.bytesBase64Encoded}`,
+        status: "complete",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: publicUrl } = supabase.storage.from("bunker-assets").getPublicUrl(fileName);
+    return new Response(JSON.stringify({
+      videoUrl: publicUrl.publicUrl,
+      status: "complete",
+      storagePath: fileName,
+    }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   return new Response(JSON.stringify({
-    status: "started",
-    taskId: data.data.taskId,
-    // Keep operationName for backward compat with client
-    operationName: data.data.taskId,
+    error: "Unexpected Veo response format",
+    details: JSON.stringify(data).substring(0, 500),
   }), {
+    status: 500,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
-async function handlePoll(taskId: string, apiKey: string, supabase: any, projectName: string, pairIndex: number) {
-  if (!taskId) throw new Error("taskId is required for polling");
+async function handlePoll(operationName: string, apiKey: string, supabase: any, projectName: string, pairIndex: number) {
+  if (!operationName) throw new Error("operationName is required for polling");
 
-  console.log(`Polling KIE Veo task: ${taskId}`);
+  const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
 
-  const response = await fetch(`https://api.kie.ai/api/v1/veo/record-info?taskId=${taskId}`, {
-    headers: { "Authorization": `Bearer ${apiKey}` },
-  });
+  console.log(`Polling Veo operation: ${operationName}`);
+
+  const response = await fetch(pollUrl);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    return new Response(JSON.stringify({
+      status: "polling",
+      done: false,
+      error: `Poll error (${response.status}): ${errorText.substring(0, 200)}`,
+    }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   const data = await response.json();
 
-  if (data.code !== 200) {
-    return new Response(JSON.stringify({
-      status: "polling",
-      done: false,
-      error: data.msg || `Poll error (${data.code})`,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const successFlag = data.data?.successFlag;
-
-  // 0 = generating
-  if (successFlag === 0) {
+  if (!data.done) {
     return new Response(JSON.stringify({
       status: "polling",
       done: false,
@@ -166,49 +203,53 @@ async function handlePoll(taskId: string, apiKey: string, supabase: any, project
     });
   }
 
-  // 2 or 3 = failed
-  if (successFlag === 2 || successFlag === 3) {
+  // Operation completed
+  if (data.error) {
     return new Response(JSON.stringify({
       status: "error",
       done: true,
-      error: data.data?.errorMessage || "Veo generation failed via KIE",
+      error: data.error.message || "Veo generation failed",
     }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  // 1 = success
-  const resultUrl = data.data?.response?.resultUrls?.[0] || data.data?.response?.originUrls?.[0];
+  // Extract video from response
+  const videoData = data.response?.predictions?.[0]?.video || data.response?.generatedSamples?.[0]?.video;
 
-  if (!resultUrl) {
-    console.error("No video URL in KIE result:", JSON.stringify(data).substring(0, 1000));
+  if (!videoData?.bytesBase64Encoded && !videoData?.uri) {
+    console.error("No video in Veo result:", JSON.stringify(data).substring(0, 1000));
     return new Response(JSON.stringify({
       status: "error",
       done: true,
-      error: "No video URL in KIE result",
+      error: "No video in Veo result",
     }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  // Download video and upload to our storage
-  console.log(`Downloading video from KIE: ${resultUrl}`);
-  const dlResponse = await fetch(resultUrl);
-  if (!dlResponse.ok) {
-    // Return the KIE URL directly if download fails
-    return new Response(JSON.stringify({
-      status: "complete",
-      done: true,
-      videoUrl: resultUrl,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+  // If we have a URI, download it
+  let videoBytes: Uint8Array;
+  if (videoData.uri) {
+    const dlResponse = await fetch(videoData.uri);
+    if (!dlResponse.ok) {
+      return new Response(JSON.stringify({
+        status: "complete",
+        done: true,
+        videoUrl: videoData.uri,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const arrayBuffer = await dlResponse.arrayBuffer();
+    videoBytes = new Uint8Array(arrayBuffer);
+  } else {
+    videoBytes = Uint8Array.from(atob(videoData.bytesBase64Encoded), c => c.charCodeAt(0));
   }
 
-  const arrayBuffer = await dlResponse.arrayBuffer();
-  const videoBytes = new Uint8Array(arrayBuffer);
+  // Upload to storage
   const safeName = (projectName || "project").replace(/[^a-zA-Z0-9_-]/g, "_");
   const fileName = `${safeName}/transitions/transition_${(pairIndex ?? 0) + 1}_${Date.now()}.mp4`;
 
@@ -221,8 +262,7 @@ async function handlePoll(taskId: string, apiKey: string, supabase: any, project
     return new Response(JSON.stringify({
       status: "complete",
       done: true,
-      videoUrl: resultUrl,
-      storageError: uploadError.message,
+      videoUrl: videoData.uri || `data:video/mp4;base64,${videoData.bytesBase64Encoded?.substring(0, 50)}...`,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

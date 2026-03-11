@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ProjectState, WorkflowStep, QualityMode, BunkerIdea, SceneData, TransitionPair, AudioData, ContinuityFlag } from '@/types/project';
-import { SCENE_TITLES } from '@/types/project';
+import { SCENE_TITLES, REPAIR_SCENES, getWorkerCuesForScene } from '@/types/project';
 
 interface ProjectStore extends ProjectState {
   projectId: string | null;
@@ -33,6 +33,8 @@ const initialScenes: SceneData[] = SCENE_TITLES.map((title, i) => ({
   narration: '',
   approved: false,
   generating: false,
+  hasRepairActivity: REPAIR_SCENES.includes(i),
+  workerCues: getWorkerCuesForScene(i),
 }));
 
 const initialState: ProjectState = {

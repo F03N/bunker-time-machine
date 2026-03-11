@@ -4,9 +4,7 @@ export type MotionPreset = 'strict-frame-match' | 'minimal-motion' | 'soft-const
 
 export type SpeedMultiplier = 1 | 2 | 3 | 4;
 
-export type TransitionFrameMode = 'start-only' | 'start-end' | 'guided-target' | 'reference-ingredients';
-
-export type VideoProvider = 'veo' | 'kling';
+export type TransitionFrameMode = 'start-only' | 'start-end' | 'guided-target';
 
 export type WorkflowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
@@ -32,6 +30,18 @@ export const SCENE_TITLES = [
   'Interior Design Transformation',
   'Final Reveal',
 ] as const;
+
+/**
+ * Scenes where visible structural repair happens.
+ * These scenes REQUIRE worker/tool presence cues in prompts.
+ */
+export const REPAIR_SCENES: number[] = [2, 3, 5, 6, 7];
+
+/**
+ * Scenes that are atmosphere-only (no visible structural change).
+ * Only dust, light, ambience allowed — no self-repair.
+ */
+export const ATMOSPHERE_ONLY_SCENES: number[] = [0, 1, 4, 8];
 
 export interface ModelConfig {
   planning: string;
@@ -76,6 +86,10 @@ export interface SceneData {
   generatedImageUrl?: string;
   approved: boolean;
   generating: boolean;
+  /** Whether this scene involves visible structural repair */
+  hasRepairActivity: boolean;
+  /** Worker/tool cues injected into the prompt */
+  workerCues: string[];
 }
 
 export interface TransitionPair {
@@ -90,7 +104,6 @@ export interface TransitionPair {
   approved: boolean;
   generating: boolean;
   motionSettings: MotionSettings;
-  videoProvider?: VideoProvider;
 }
 
 export interface MotionSettings {
@@ -132,7 +145,7 @@ export interface ProjectState {
 
 export interface ContinuityFlag {
   sceneIndex: number;
-  type: 'identity' | 'angle' | 'framing' | 'environment' | 'progression';
+  type: 'identity' | 'angle' | 'framing' | 'environment' | 'progression' | 'worker-logic';
   message: string;
   severity: 'warning' | 'error';
 }
@@ -144,4 +157,52 @@ export function getActiveModels(quality: QualityMode) {
     video: quality === 'fast' ? GOOGLE_MODELS.videoDraft : GOOGLE_MODELS.videoFinal,
     tts: quality === 'fast' ? GOOGLE_MODELS.ttsFast : GOOGLE_MODELS.tts,
   };
+}
+
+/**
+ * Check if a scene transition involves visible structural repair.
+ * If yes, worker/tool cues are required. If no, only atmosphere is allowed.
+ */
+export function requiresWorkerCues(startSceneIndex: number, endSceneIndex: number): boolean {
+  return REPAIR_SCENES.includes(endSceneIndex);
+}
+
+/**
+ * Get appropriate worker cues for a repair scene.
+ */
+export function getWorkerCuesForScene(sceneIndex: number): string[] {
+  const cueMap: Record<number, string[]> = {
+    2: ['scaffolding erected around exterior', 'power tools and welding equipment visible', 'construction materials stacked nearby'],
+    3: ['scaffolding nearly complete', 'fresh concrete patches visible', 'equipment positioned for finishing work'],
+    5: ['interior scaffolding and work lights', 'debris removal equipment', 'cable trays being installed'],
+    6: ['interior finishing tools', 'paint equipment', 'lighting fixtures being mounted'],
+    7: ['design furniture being positioned', 'decorative panels mounted', 'final lighting adjustments'],
+  };
+  return cueMap[sceneIndex] || [];
+}
+
+/**
+ * Validate that a motion prompt does not imply magical self-repair
+ * without worker presence in a repair scene.
+ */
+export function validateRepairLogic(
+  startSceneIndex: number,
+  endSceneIndex: number,
+  motionPrompt: string
+): ContinuityFlag | null {
+  if (!requiresWorkerCues(startSceneIndex, endSceneIndex)) return null;
+
+  const magicTerms = ['self-repair', 'magically', 'instantly', 'transforms on its own', 'repairs itself'];
+  const hasWorkerRef = /worker|tool|scaffold|equipment|welding|construction|machinery|cable|debris/i.test(motionPrompt);
+  const hasMagicRef = magicTerms.some(t => motionPrompt.toLowerCase().includes(t));
+
+  if (hasMagicRef || !hasWorkerRef) {
+    return {
+      sceneIndex: endSceneIndex,
+      type: 'worker-logic',
+      message: `Transition ${startSceneIndex + 1}→${endSceneIndex + 1}: Visible repair requires worker/tool presence cues. No magical self-repair allowed.`,
+      severity: 'error',
+    };
+  }
+  return null;
 }
