@@ -51,10 +51,16 @@ async function handleGenerate(body: any, apiKey: string, supabase: any) {
     console.log(`Using start frame (Image A) as initial image for Veo`);
   }
 
-  // Veo 3.1 does NOT support exact end-frame matching.
-  // End image is included in prompt context only as a visual guide.
+  // Veo 3.1 does NOT support a dedicated end-frame parameter.
+  // Best-effort: include end image as a second reference image in the request
+  // to give Veo visual context about the target state.
   if (endImageBase64) {
-    console.log(`End image (Image B) provided as visual target/guide — NOT exact end-frame (Veo limitation)`);
+    const cleanEndBase64 = endImageBase64.includes(",") ? endImageBase64.split(",")[1] : endImageBase64;
+    instances.referenceImages = [{
+      referenceImage: { bytesBase64Encoded: cleanEndBase64 },
+      referenceType: "STYLE_IMAGE",
+    }];
+    console.log(`End image (Image B) included as STYLE_IMAGE reference — Veo uses it as visual guide, NOT exact end-frame`);
   }
 
   // Scene-aware person generation for video transitions

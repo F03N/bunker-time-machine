@@ -38,8 +38,14 @@ export function SceneImageChain() {
         }
       }
 
+      // Inject scene-aware worker cues into the actual prompt
+      const workerInstruction = getWorkerPromptInstruction(idx);
+      const fullPrompt = workerInstruction
+        ? `${scenes[idx].imagePrompt}\n\n${workerInstruction}`
+        : scenes[idx].imagePrompt;
+
       const result = await callImagen({
-        prompt: scenes[idx].imagePrompt,
+        prompt: fullPrompt,
         model: getImageModel(qualityMode),
         referenceImageBase64,
         sceneIndex: idx,
