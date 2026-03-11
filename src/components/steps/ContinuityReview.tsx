@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { AlertTriangle, Check, RefreshCw, X, Loader2, Eye } from 'lucide-react';
 import { callGemini, callImagen, getImageModel, getPlanningModel, imageUrlToBase64 } from '@/lib/google-ai';
 import { getContinuityReviewPrompt } from '@/lib/prompts';
-import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES } from '@/types/project';
+import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES, SCENE_WORKER_PRESENCE } from '@/types/project';
 import type { ContinuityFlag } from '@/types/project';
 import { toast } from 'sonner';
 
