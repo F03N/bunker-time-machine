@@ -39,6 +39,20 @@ interface VeoResponse {
   storagePath?: string;
 }
 
+interface TtsRequest {
+  text: string;
+  model?: string;
+  voiceName?: string;
+  sceneIndex?: number;
+  projectName: string;
+}
+
+interface TtsResponse {
+  audioUrl: string;
+  mimeType: string;
+  storagePath?: string;
+}
+
 export async function callGemini({ messages, model, systemPrompt }: GeminiRequest): Promise<string> {
   const { data, error } = await supabase.functions.invoke('gemini-generate', {
     body: { messages, model, systemPrompt },
@@ -126,12 +140,32 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
   throw new Error(data.message || 'No video URL returned from Veo');
 }
 
+export async function callTts(req: TtsRequest): Promise<TtsResponse> {
+  const { data, error } = await supabase.functions.invoke('tts-generate', {
+    body: req,
+  });
+
+  if (error) throw new Error(`TTS error: ${error.message}`);
+  if (data?.error) throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
+  if (!data?.audioUrl) throw new Error('No audio URL returned from TTS');
+
+  return {
+    audioUrl: data.audioUrl,
+    mimeType: data.mimeType || 'audio/wav',
+    storagePath: data.storagePath,
+  };
+}
+
 export function getImageModel(quality: QualityMode): string {
   return getActiveModels(quality).image;
 }
 
 export function getVideoModel(quality: QualityMode): string {
   return getActiveModels(quality).video;
+}
+
+export function getTtsModel(quality: QualityMode): string {
+  return getActiveModels(quality).tts;
 }
 
 export function getPlanningModel(quality: QualityMode): string {

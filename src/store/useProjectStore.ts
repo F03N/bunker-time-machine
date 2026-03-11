@@ -52,6 +52,9 @@ const initialState: ProjectState = {
     ambienceNotes: Array(9).fill(''),
     sfxNotes: Array(9).fill(''),
     ttsReady: false,
+    generatedAudioUrls: Array(9).fill(''),
+    fullAudioUrl: undefined,
+    audioGenerated: false,
   },
   continuityFlags: [],
 };
