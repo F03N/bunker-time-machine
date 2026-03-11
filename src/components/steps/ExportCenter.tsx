@@ -118,13 +118,28 @@ export function ExportCenter() {
         }, null, 2));
       });
 
-      // /audio
+      // /audio — text files
       if (audio.fullScript) {
         zip.file('audio/narration_script.txt', audio.fullScript);
         zip.file('audio/scene_narrations.json', JSON.stringify(audio.sceneNarrations, null, 2));
         zip.file('audio/ambience_notes.json', JSON.stringify(audio.ambienceNotes, null, 2));
         zip.file('audio/sfx_notes.json', JSON.stringify(audio.sfxNotes, null, 2));
       }
+
+      // /audio — download generated TTS audio files
+      const audioPromises = (audio.generatedAudioUrls || []).map(async (url, i) => {
+        if (!url) return;
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          const ext = blob.type.includes('mp3') ? 'mp3' : 'wav';
+          zip.file(`audio/scene_${i + 1}_narration.${ext}`, blob);
+        } catch (err) {
+          console.warn(`Could not download audio for scene ${i + 1}:`, err);
+          zip.file(`audio/scene_${i + 1}_url.txt`, url);
+        }
+      });
 
       // /scenes — download actual images
       const imagePromises = scenes.map(async (s, i) => {
