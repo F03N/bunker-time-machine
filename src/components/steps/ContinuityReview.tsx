@@ -3,7 +3,7 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, Check, RefreshCw, X, Loader2, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Check, RefreshCw, X, Loader2, Eye, ChevronLeft, ChevronRight, Shield } from 'lucide-react';
 import { callGemini, callImagen, getImageModel, getPlanningModel, imageUrlToBase64 } from '@/lib/google-ai';
 import { getContinuityReviewPrompt, getStructuralAnchor } from '@/lib/prompts';
 import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES, SCENE_WORKER_PRESENCE, getWorkerPromptInstruction } from '@/types/project';
@@ -19,6 +19,7 @@ export function ContinuityReview() {
   const [compareMode, setCompareMode] = useState(false);
   const [compareIndex, setCompareIndex] = useState(0);
   const [visualCheckDone, setVisualCheckDone] = useState(false);
+  const [repairingAll, setRepairingAll] = useState(false);
 
   const ideaTitle = selectedIdeaIndex !== null && ideas[selectedIdeaIndex]
     ? ideas[selectedIdeaIndex].title : name;
@@ -28,76 +29,50 @@ export function ContinuityReview() {
     const flags: ContinuityFlag[] = [];
 
     try {
-      // 1. Local logic checks: worker-based repair validation
+      // 1. Worker-based repair validation
       for (let i = 0; i < 8; i++) {
         const motionPrompt = scenes[i + 1]?.motionPrompt || '';
         const flag = validateRepairLogic(i, i + 1, motionPrompt);
         if (flag) flags.push(flag);
       }
 
-      // 2. Check for missing images
+      // 2. Missing images
       scenes.forEach((scene, idx) => {
         if (!scene.generatedImageUrl) {
-          flags.push({
-            sceneIndex: idx,
-            type: 'identity',
-            message: `Scene ${idx + 1} has no generated image — cannot verify continuity.`,
-            severity: 'error',
-          });
+          flags.push({ sceneIndex: idx, type: 'identity', message: `Scene ${idx + 1} has no generated image.`, severity: 'error' });
         }
       });
 
-      // 3. Scene-aware worker presence validation
+      // 3. Worker presence validation
       scenes.forEach((scene, idx) => {
         const presence = SCENE_WORKER_PRESENCE[idx];
         if (!presence || !scene.imagePrompt) return;
-
         const hasWorkerRef = /worker|crew|silhouette|figure|person|team|staff|laborer/i.test(scene.imagePrompt);
         const hasToolRef = /scaffold|tool|equipment|welding|construction|machinery|cable|debris|paint|mount|drill|hammer|generator|light.?set|material/i.test(scene.imagePrompt);
-
         if (presence.level === 'required' && !hasWorkerRef && !hasToolRef) {
-          flags.push({
-            sceneIndex: idx,
-            type: 'worker-logic',
-            message: `Scene ${idx + 1} (${scene.title}): Workers REQUIRED but no worker/tool cues in prompt.`,
-            severity: 'error',
-          });
+          flags.push({ sceneIndex: idx, type: 'worker-logic', message: `Scene ${idx + 1}: Workers REQUIRED but no worker/tool cues in prompt.`, severity: 'error' });
         }
-
         if (presence.level === 'none') {
           const hasRepairRef = /repair|fix|construct|build|install|weld|scaffold|worker|crew/i.test(scene.imagePrompt);
           if (hasRepairRef) {
-            flags.push({
-              sceneIndex: idx,
-              type: 'worker-logic',
-              message: `Scene ${idx + 1}: Atmosphere-only scene contains construction language.`,
-              severity: 'warning',
-            });
+            flags.push({ sceneIndex: idx, type: 'worker-logic', message: `Scene ${idx + 1}: Atmosphere-only scene contains construction language.`, severity: 'warning' });
           }
         }
       });
 
-      // 4. Prompt-level structural consistency
+      // 4. Structural consistency
       const firstPrompt = scenes[0]?.imagePrompt || '';
       for (let i = 1; i < 9; i++) {
         const prompt = scenes[i]?.imagePrompt || '';
         if (!prompt || !firstPrompt) continue;
         const structuralTerms = firstPrompt.match(/(?:concrete|steel|metal|stone|brick|bunker|entrance|door|hatch)\s+\w+/gi) || [];
-        const missingTerms = structuralTerms.filter(term => {
-          const keyword = term.split(/\s+/)[0].toLowerCase();
-          return !prompt.toLowerCase().includes(keyword);
-        });
+        const missingTerms = structuralTerms.filter(term => !prompt.toLowerCase().includes(term.split(/\s+/)[0].toLowerCase()));
         if (missingTerms.length > structuralTerms.length * 0.5 && structuralTerms.length > 2) {
-          flags.push({
-            sceneIndex: i,
-            type: 'identity',
-            message: `Scene ${i + 1}: Prompt may drift from bunker identity. Missing structural terms.`,
-            severity: 'warning',
-          });
+          flags.push({ sceneIndex: i, type: 'identity', message: `Scene ${i + 1}: Prompt drifts from bunker identity established in Scene 1.`, severity: 'warning' });
         }
       }
 
-      // 5. Progression keyword check
+      // 5. Progression keywords
       const progressionKeywords = [
         ['damaged', 'abandoned', 'broken', 'rust', 'debris', 'crack'],
         ['arriving', 'tools', 'inspecting', 'setup'],
@@ -114,78 +89,44 @@ export function ContinuityReview() {
         const expected = progressionKeywords[i] || [];
         const matches = expected.filter(kw => prompt.includes(kw));
         if (matches.length === 0 && expected.length > 0 && prompt.length > 0) {
-          flags.push({
-            sceneIndex: i,
-            type: 'progression',
-            message: `Scene ${i + 1}: Missing expected progression keywords: ${expected.slice(0, 3).join(', ')}.`,
-            severity: 'warning',
-          });
+          flags.push({ sceneIndex: i, type: 'progression', message: `Scene ${i + 1}: Missing progression keywords: ${expected.slice(0, 3).join(', ')}.`, severity: 'warning' });
         }
       }
 
-      // 6. AI VISUAL continuity check — send actual images to Gemini Vision
+      // 6. Gemini Vision visual analysis
       const scenesWithImages = scenes.filter(s => s.generatedImageUrl);
       if (scenesWithImages.length >= 4) {
         try {
-          toast.info('Running visual analysis with Gemini Vision…');
-          
-          // Collect image data for consecutive pairs
+          toast.info('Running Gemini Vision visual analysis…');
           const imageContents: any[] = [];
-          for (let i = 0; i < scenes.length; i++) {
-            const scene = scenes[i];
+          for (const scene of scenes) {
             if (scene.generatedImageUrl) {
               try {
                 const base64 = await imageUrlToBase64(scene.generatedImageUrl);
-                imageContents.push({
-                  sceneIndex: i,
-                  title: scene.title,
-                  base64,
-                });
-              } catch {
-                imageContents.push({ sceneIndex: i, title: scene.title, base64: null });
-              }
+                imageContents.push({ sceneIndex: scene.index, title: scene.title, base64 });
+              } catch { imageContents.push({ sceneIndex: scene.index, title: scene.title, base64: null }); }
             }
           }
-
-          // Send images to Gemini for visual analysis
           const result = await callGemini({
-            messages: [{ 
-              role: 'user', 
-              content: getContinuityReviewPrompt(),
-            }],
+            messages: [{ role: 'user', content: getContinuityReviewPrompt() }],
             model: getPlanningModel(qualityMode),
-            imageInputs: imageContents
-              .filter(ic => ic.base64)
-              .map(ic => ({
-                base64: ic.base64,
-                label: `Scene ${ic.sceneIndex + 1}: ${ic.title}`,
-              })),
+            imageInputs: imageContents.filter(ic => ic.base64).map(ic => ({ base64: ic.base64, label: `Scene ${ic.sceneIndex + 1}: ${ic.title}` })),
           });
-
           let cleanText = result.trim();
-          if (cleanText.startsWith('```')) {
-            cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-          }
-          
+          if (cleanText.startsWith('```')) cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
           const aiFlags: ContinuityFlag[] = JSON.parse(cleanText);
           flags.push(...aiFlags);
           setVisualCheckDone(true);
         } catch (aiErr) {
-          console.warn('AI visual continuity check failed:', aiErr);
+          console.warn('AI visual check failed:', aiErr);
           toast.info('Visual analysis unavailable — using text-based validation only.');
         }
       }
 
       setContinuityFlags(flags);
       setChecked(true);
-      
-      if (flags.length === 0) {
-        toast.success('All scenes pass continuity check');
-      } else {
-        const errors = flags.filter(f => f.severity === 'error').length;
-        const warnings = flags.filter(f => f.severity === 'warning').length;
-        toast.warning(`Found ${errors} errors and ${warnings} warnings`);
-      }
+      if (flags.length === 0) toast.success('All scenes pass continuity check');
+      else toast.warning(`Found ${flags.filter(f => f.severity === 'error').length} errors and ${flags.filter(f => f.severity === 'warning').length} warnings`);
     } catch (err) {
       console.error('Continuity check failed:', err);
       toast.error(`Check failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -197,17 +138,22 @@ export function ContinuityReview() {
   const handleRegenerate = async (idx: number) => {
     setRegenerating(idx);
     try {
+      // For repair: always use Scene 1 as the canonical identity anchor when available
       let referenceImageBase64: string | undefined;
+      
+      // Primary: use previous scene for sequential continuity
       if (idx > 0 && scenes[idx - 1].generatedImageUrl) {
         referenceImageBase64 = await imageUrlToBase64(scenes[idx - 1].generatedImageUrl!);
       }
 
-      // Include worker cues and structural anchor in regeneration
       const workerInstruction = getWorkerPromptInstruction(idx);
       const structuralAnchor = getStructuralAnchor(idx, ideaTitle);
+      
+      // Build repair-enhanced prompt with stronger identity lock
       let fullPrompt = scenes[idx].imagePrompt;
       if (workerInstruction) fullPrompt += `\n\n${workerInstruction}`;
       fullPrompt += structuralAnchor;
+      fullPrompt += `\n\nREPAIR REGENERATION: This image is being regenerated to fix drift. Prioritize EXACT structural match with Scene 1's bunker shape, entrance geometry, and camera angle over all other concerns. Maintain the same visual identity established at the start of the sequence.`;
 
       const result = await callImagen({
         prompt: fullPrompt,
@@ -217,14 +163,10 @@ export function ContinuityReview() {
         projectName: name.replace(/\s+/g, '_') || 'project',
       });
 
-      updateScene(idx, {
-        generatedImageUrl: result.imageUrl,
-        approved: false,
-      });
-
+      updateScene(idx, { generatedImageUrl: result.imageUrl, approved: false });
       const updatedFlags = continuityFlags.filter(f => f.sceneIndex !== idx);
       setContinuityFlags(updatedFlags);
-      toast.success(`Scene ${idx + 1} regenerated`);
+      toast.success(`Scene ${idx + 1} regenerated with identity lock`);
     } catch (err) {
       console.error(`Scene ${idx + 1} regeneration failed:`, err);
       toast.error(`Regeneration failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -233,8 +175,25 @@ export function ContinuityReview() {
     }
   };
 
+  // Batch repair: regenerate all flagged scenes sequentially
+  const handleRepairAll = async () => {
+    const flaggedScenes = [...new Set(continuityFlags.filter(f => f.severity === 'error' && f.type !== 'identity').map(f => f.sceneIndex))].sort();
+    if (flaggedScenes.length === 0) { toast.info('No repairable scenes'); return; }
+    
+    setRepairingAll(true);
+    toast.info(`Repairing ${flaggedScenes.length} scene(s) with identity lock…`);
+    
+    for (const idx of flaggedScenes) {
+      await handleRegenerate(idx);
+    }
+    
+    setRepairingAll(false);
+    toast.success('Batch repair complete — re-run check to verify');
+  };
+
   const hasBlockingErrors = continuityFlags.some(f => f.severity === 'error' && f.type !== 'identity');
   const sceneFlags = (idx: number) => continuityFlags.filter(f => f.sceneIndex === idx);
+  const repairableCount = [...new Set(continuityFlags.filter(f => f.severity === 'error' && f.type !== 'identity').map(f => f.sceneIndex))].length;
 
   const comparePairA = scenes[compareIndex];
   const comparePairB = scenes[compareIndex + 1];
@@ -243,7 +202,7 @@ export function ContinuityReview() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Continuity Review</h1>
-        <p className="text-sm text-muted-foreground">Inspect scenes for drift, worker logic, and progression. Includes Gemini Vision analysis.</p>
+        <p className="text-sm text-muted-foreground">Validate scenes for drift, worker logic, and progression. Includes Gemini Vision analysis.</p>
       </div>
 
       <div className="flex gap-2 px-1 text-[10px] flex-wrap">
@@ -253,16 +212,10 @@ export function ContinuityReview() {
       </div>
 
       <div className="flex gap-2 px-1">
-        <button
-          onClick={() => setCompareMode(false)}
-          className={`px-3 py-1.5 rounded text-xs font-semibold ${!compareMode ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}
-        >
+        <button onClick={() => setCompareMode(false)} className={`px-3 py-1.5 rounded text-xs font-semibold ${!compareMode ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>
           Grid View
         </button>
-        <button
-          onClick={() => setCompareMode(true)}
-          className={`px-3 py-1.5 rounded text-xs font-semibold ${compareMode ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}
-        >
+        <button onClick={() => setCompareMode(true)} className={`px-3 py-1.5 rounded text-xs font-semibold ${compareMode ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>
           Pair Compare
         </button>
       </div>
@@ -307,6 +260,12 @@ export function ContinuityReview() {
                       [{f.type}] {f.message.substring(0, 60)}…
                     </p>
                   ))}
+                  {/* Quick repair button in pair compare */}
+                  {flags.some(f => f.severity === 'error') && scene?.generatedImageUrl && (
+                    <Button variant="outline" size="sm" className="h-7 text-[10px] mt-1" onClick={() => handleRegenerate(idx)} disabled={regenerating !== null}>
+                      {regenerating === idx ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Shield className="w-3 h-3 mr-1" /> Repair</>}
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -320,7 +279,6 @@ export function ContinuityReview() {
             const hasWarning = flags.some(f => f.severity === 'warning');
             const presence = SCENE_WORKER_PRESENCE[idx];
             const isRegenerating = regenerating === idx;
-            
             return (
               <button
                 key={idx}
@@ -336,27 +294,19 @@ export function ContinuityReview() {
                 {scene.generatedImageUrl ? (
                   <img src={scene.generatedImageUrl} alt={`Scene ${idx + 1}`} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full bg-secondary flex items-center justify-center">
-                    <span className="text-xs text-muted-foreground">{idx + 1}</span>
-                  </div>
+                  <div className="w-full h-full bg-secondary flex items-center justify-center"><span className="text-xs text-muted-foreground">{idx + 1}</span></div>
                 )}
                 <div className="absolute bottom-0 left-0 right-0 bg-background/80 px-1 py-0.5">
                   <div className="flex items-center gap-1">
-                    <span className="text-[9px]">
-                      {presence?.level === 'required' ? '👷' : presence?.level === 'optional' ? '🔧' : '🌫️'}
-                    </span>
+                    <span className="text-[9px]">{presence?.level === 'required' ? '👷' : presence?.level === 'optional' ? '🔧' : '🌫️'}</span>
                     <span className="text-[10px] font-semibold truncate">{idx + 1}. {scene.title.split('(')[0].trim()}</span>
                   </div>
                 </div>
                 {flags.length > 0 && (
-                  <div className="absolute top-1 right-1">
-                    <AlertTriangle className={`w-4 h-4 ${hasError ? 'text-destructive' : 'text-yellow-500'}`} />
-                  </div>
+                  <div className="absolute top-1 right-1"><AlertTriangle className={`w-4 h-4 ${hasError ? 'text-destructive' : 'text-yellow-500'}`} /></div>
                 )}
                 {checked && flags.length === 0 && scene.generatedImageUrl && (
-                  <div className="absolute top-1 right-1">
-                    <Check className="w-4 h-4 text-step-complete" />
-                  </div>
+                  <div className="absolute top-1 right-1"><Check className="w-4 h-4 text-step-complete" /></div>
                 )}
               </button>
             );
@@ -376,18 +326,16 @@ export function ContinuityReview() {
                   : ''}
               </span>
             </div>
-            <button onClick={() => setSelectedScene(null)}>
-              <X className="w-4 h-4 text-muted-foreground" />
-            </button>
+            <button onClick={() => setSelectedScene(null)}><X className="w-4 h-4 text-muted-foreground" /></button>
           </div>
           
           {scenes[selectedScene].generatedImageUrl && (
-            <img src={scenes[selectedScene].generatedImageUrl} alt={`Scene ${selectedScene + 1} full`} className="w-full rounded-md aspect-[9/16] object-cover mb-3" />
+            <img src={scenes[selectedScene].generatedImageUrl} alt={`Scene ${selectedScene + 1}`} className="w-full rounded-md aspect-[9/16] object-cover mb-3" />
           )}
 
           {REPAIR_SCENES.includes(selectedScene) && scenes[selectedScene].workerCues?.length > 0 && (
             <div className="mb-2 p-2 rounded bg-primary/10">
-              <p className="text-[10px] font-semibold text-primary mb-1">Construction Cues in Prompt:</p>
+              <p className="text-[10px] font-semibold text-primary mb-1">Construction Cues:</p>
               {scenes[selectedScene].workerCues.map((cue, i) => (
                 <p key={i} className="text-[10px] text-muted-foreground">• {cue}</p>
               ))}
@@ -397,52 +345,38 @@ export function ContinuityReview() {
           {sceneFlags(selectedScene).map((flag, i) => (
             <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded mb-1 ${flag.severity === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-yellow-600/10 text-yellow-500'}`}>
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-              <div>
-                <span className="font-semibold">[{flag.type}]</span> {flag.message}
-              </div>
+              <div><span className="font-semibold">[{flag.type}]</span> {flag.message}</div>
             </div>
           ))}
 
           {checked && sceneFlags(selectedScene).length === 0 && scenes[selectedScene].generatedImageUrl && (
             <div className="flex items-center gap-2 text-xs text-step-complete p-2">
-              <Check className="w-3 h-3" />
-              <span>Scene passes all checks</span>
+              <Check className="w-3 h-3" /><span>Scene passes all checks</span>
             </div>
           )}
 
           <Button variant="outline" size="sm" className="w-full mt-2 touch-target" onClick={() => handleRegenerate(selectedScene)} disabled={regenerating !== null}>
             {regenerating === selectedScene ? (
-              <span className="flex items-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Regenerating…</span>
+              <span className="flex items-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Repairing with identity lock…</span>
             ) : (
-              <span className="flex items-center gap-1"><RefreshCw className="w-4 h-4" /> Regenerate Scene {selectedScene + 1}</span>
+              <span className="flex items-center gap-1"><Shield className="w-4 h-4" /> Repair Scene {selectedScene + 1}</span>
             )}
           </Button>
         </WorkshopCard>
       )}
 
-      {/* Check button */}
+      {/* Check / Results */}
       <WorkshopCard generating={checking}>
         {!checked ? (
-          <button
-            onClick={handleRunCheck}
-            disabled={checking}
-            className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-md touch-target flex items-center justify-center gap-2"
-          >
-            {checking ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Running Continuity Check…</>
-            ) : (
-              <><Eye className="w-4 h-4" /> Run Continuity Check</>
-            )}
+          <button onClick={handleRunCheck} disabled={checking} className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-md touch-target flex items-center justify-center gap-2">
+            {checking ? <><Loader2 className="w-4 h-4 animate-spin" /> Running 6-Layer Continuity Check…</> : <><Eye className="w-4 h-4" /> Run Continuity Check</>}
           </button>
         ) : continuityFlags.length === 0 ? (
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2 text-step-complete text-sm">
-              <Check className="w-5 h-5" />
-              <span className="font-semibold">All 9 scenes pass continuity check.</span>
+              <Check className="w-5 h-5" /><span className="font-semibold">All 9 scenes pass continuity check.</span>
             </div>
-            {visualCheckDone && (
-              <p className="text-[10px] text-muted-foreground">✓ Includes Gemini Vision visual analysis</p>
-            )}
+            {visualCheckDone && <p className="text-[10px] text-muted-foreground">✓ Includes Gemini Vision visual analysis</p>}
           </div>
         ) : (
           <div className="space-y-2">
@@ -451,13 +385,9 @@ export function ContinuityReview() {
                 <p className="text-xs font-semibold">
                   {continuityFlags.filter(f => f.severity === 'error').length} errors, {continuityFlags.filter(f => f.severity === 'warning').length} warnings
                 </p>
-                {visualCheckDone && (
-                  <p className="text-[10px] text-muted-foreground">Includes visual analysis</p>
-                )}
+                {visualCheckDone && <p className="text-[10px] text-muted-foreground">Includes visual analysis</p>}
               </div>
-              <Button variant="outline" size="sm" onClick={() => { setChecked(false); setContinuityFlags([]); setVisualCheckDone(false); }}>
-                Re-check
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => { setChecked(false); setContinuityFlags([]); setVisualCheckDone(false); }}>Re-check</Button>
             </div>
             <div className="max-h-32 overflow-y-auto space-y-1">
               {continuityFlags.map((flag, i) => (
@@ -466,6 +396,16 @@ export function ContinuityReview() {
                 </div>
               ))}
             </div>
+            {/* Batch repair button */}
+            {repairableCount > 0 && (
+              <Button variant="default" size="sm" className="w-full touch-target" onClick={handleRepairAll} disabled={repairingAll || regenerating !== null}>
+                {repairingAll ? (
+                  <span className="flex items-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Repairing {repairableCount} scene(s)…</span>
+                ) : (
+                  <span className="flex items-center gap-1"><Shield className="w-4 h-4" /> Repair All Flagged Scenes ({repairableCount})</span>
+                )}
+              </Button>
+            )}
           </div>
         )}
       </WorkshopCard>
