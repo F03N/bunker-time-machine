@@ -39,6 +39,20 @@ interface VeoResponse {
   storagePath?: string;
 }
 
+interface TtsRequest {
+  text: string;
+  model?: string;
+  voiceName?: string;
+  sceneIndex?: number;
+  projectName: string;
+}
+
+interface TtsResponse {
+  audioUrl: string;
+  mimeType: string;
+  storagePath?: string;
+}
+
 export async function callGemini({ messages, model, systemPrompt }: GeminiRequest): Promise<string> {
   const { data, error } = await supabase.functions.invoke('gemini-generate', {
     body: { messages, model, systemPrompt },
