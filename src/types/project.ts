@@ -48,6 +48,26 @@ export const REPAIR_SCENES: number[] = [1, 2, 3, 4, 5, 6, 7];
  */
 export const ATMOSPHERE_ONLY_SCENES: number[] = [0, 8];
 
+/**
+ * Scene-aware worker presence level per the master prompt.
+ * 'required'  — master prompt explicitly describes worker-driven activity
+ * 'optional'  — workers may appear but are not the focus
+ * 'none'      — no workers present (atmosphere-only)
+ */
+export type WorkerPresence = 'required' | 'optional' | 'none';
+
+export const SCENE_WORKER_PRESENCE: Record<number, { level: WorkerPresence; description: string }> = {
+  0: { level: 'none',     description: 'No workers. Abandoned, neglected atmosphere only.' },
+  1: { level: 'required', description: 'Construction crew arrives. Workers carrying tools, inspecting site, setting up lighting.' },
+  2: { level: 'required', description: 'Active worker-driven repair. Debris removal, welding, reinforcing damaged sections.' },
+  3: { level: 'optional', description: 'Workers optional. Mostly organized near-complete exterior with clean surfaces.' },
+  4: { level: 'required', description: 'Workers opening or accessing bunker entrance. Active entry scene.' },
+  5: { level: 'required', description: 'Worker-driven interior repair. Installing lighting, wall repairs, flooring, cables.' },
+  6: { level: 'optional', description: 'Workers minimal. Clean modern interior, finishing touches.' },
+  7: { level: 'optional', description: 'Workers usually absent. Design reveal with furniture and decor.' },
+  8: { level: 'none',     description: 'No workers. Cinematic reveal of fully restored space.' },
+};
+
 export interface ModelConfig {
   planning: string;
   planningFast: string;
