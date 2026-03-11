@@ -120,7 +120,7 @@ const Index = () => {
   if (checkingAuth) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <span className="text-primary font-bold text-2xl tracking-tight animate-pulse">W&W</span>
+        <span className="text-primary font-bold text-2xl tracking-tight animate-pulse">BTL</span>
       </div>
     );
   }

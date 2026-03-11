@@ -9,8 +9,5 @@ verify_jwt = false
 [functions.veo-generate]
 verify_jwt = false
 
-[functions.kling-generate]
-verify_jwt = false
-
 [functions.tts-generate]
 verify_jwt = false
