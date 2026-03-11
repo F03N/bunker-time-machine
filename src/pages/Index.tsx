@@ -120,7 +120,7 @@ const Index = () => {
   if (checkingAuth) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <span className="text-primary font-bold text-2xl tracking-tight animate-pulse">W&W</span>
+        <span className="text-primary font-bold text-2xl tracking-tight animate-pulse">BTL</span>
       </div>
     );
   }
@@ -143,7 +143,7 @@ const Index = () => {
             <button onClick={handleBackToList} className="text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <span className="text-primary font-bold text-sm tracking-tight">W&W</span>
+            <span className="text-primary font-bold text-sm tracking-tight">BTL</span>
             {store.name && <span className="text-xs text-muted-foreground truncate max-w-[100px]">/ {store.name}</span>}
           </div>
           <div className="flex items-center gap-2">

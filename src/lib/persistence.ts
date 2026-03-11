@@ -53,7 +53,17 @@ export async function loadProject(id: string): Promise<ProjectState> {
     selectedIdeaIndex: data.selected_idea_index,
     scenes: (data.scenes as any[])?.length > 0 ? (data.scenes as any[]) : initialScenes,
     transitions: (data.transitions as any[]) || [],
-    audio: (data.audio as any) || { fullScript: '', sceneNarrations: [], ambienceNotes: [], sfxNotes: [], ttsReady: false },
+    audio: {
+      fullScript: '',
+      sceneNarrations: Array(9).fill(''),
+      ambienceNotes: Array(9).fill(''),
+      sfxNotes: Array(9).fill(''),
+      ttsReady: false,
+      generatedAudioUrls: Array(9).fill(''),
+      fullAudioUrl: undefined,
+      audioGenerated: false,
+      ...((data.audio as any) || {}),
+    },
     continuityFlags: (data.continuity_flags as any[]) || [],
   };
 }

@@ -35,9 +35,10 @@ export function AuthPage({ onAuth }: { onAuth: () => void }) {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <span className="text-primary font-bold text-2xl tracking-tight">W&W</span>
-          <h1 className="text-lg font-bold mt-2">Bunker Restoration Studio</h1>
-          <p className="text-xs text-muted-foreground mt-1">Workflow automation for viral AI timelapse videos</p>
+          <span className="text-primary font-bold text-2xl tracking-tight">BUNKER TIME LAPSE</span>
+          <h1 className="text-lg font-bold mt-2">Production Workflow Studio</h1>
+          <p className="text-xs text-muted-foreground mt-1">AI-powered viral bunker restoration timelapse videos</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Gemini · Imagen 4 · Veo 3.1 · Google TTS</p>
         </div>
 
         <WorkshopCard>

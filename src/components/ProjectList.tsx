@@ -60,7 +60,7 @@ export function ProjectList({ onNewProject, onLoadProject, onLogout }: ProjectLi
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-40 bg-background/90 backdrop-blur-sm border-b border-border">
         <div className="flex items-center justify-between px-4 py-3">
-          <span className="text-primary font-bold text-sm tracking-tight">W&W</span>
+          <span className="text-primary font-bold text-sm tracking-tight">BUNKER TIME LAPSE</span>
           <button onClick={onLogout} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <LogOut className="w-3.5 h-3.5" /> Sign Out
           </button>
