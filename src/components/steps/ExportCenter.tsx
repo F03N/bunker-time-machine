@@ -200,7 +200,7 @@ Style: Hyper-realistic construction timelapse
 
       toast.info('Downloading assets into ZIP…');
 
-      await Promise.all([...imagePromises, ...videoPromises]);
+      await Promise.all([...imagePromises, ...videoPromises, ...audioPromises]);
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(blob);
