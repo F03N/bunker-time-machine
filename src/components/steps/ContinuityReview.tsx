@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { AlertTriangle, Check, RefreshCw, X, Loader2, Eye } from 'lucide-react';
 import { callGemini, callImagen, getImageModel, getPlanningModel, imageUrlToBase64 } from '@/lib/google-ai';
 import { getContinuityReviewPrompt } from '@/lib/prompts';
-import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES } from '@/types/project';
+import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES, SCENE_WORKER_PRESENCE } from '@/types/project';
 import type { ContinuityFlag } from '@/types/project';
 import { toast } from 'sonner';
 
@@ -230,7 +230,9 @@ export function ContinuityReview() {
             <div>
               <h3 className="font-bold text-sm">Scene {selectedScene + 1}: {scenes[selectedScene].title}</h3>
               <span className={`text-[10px] font-semibold ${REPAIR_SCENES.includes(selectedScene) ? 'text-primary' : 'text-muted-foreground'}`}>
-                {REPAIR_SCENES.includes(selectedScene) ? '🔧 Construction Scene — Tools/Equipment Required' : '🌫️ Atmosphere Only — No Construction'}
+                {SCENE_WORKER_PRESENCE[selectedScene]
+                  ? `${SCENE_WORKER_PRESENCE[selectedScene].level === 'required' ? '👷' : SCENE_WORKER_PRESENCE[selectedScene].level === 'optional' ? '🔧' : '🌫️'} ${SCENE_WORKER_PRESENCE[selectedScene].description}`
+                  : ''}
               </span>
             </div>
             <button onClick={() => setSelectedScene(null)}>

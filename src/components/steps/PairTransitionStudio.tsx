@@ -3,7 +3,7 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
-import { DEFAULT_MOTION_SETTINGS, REPAIR_SCENES } from '@/types/project';
+import { DEFAULT_MOTION_SETTINGS, REPAIR_SCENES, SCENE_WORKER_PRESENCE } from '@/types/project';
 import type { TransitionPair, SpeedMultiplier, MotionPreset } from '@/types/project';
 import { Check, Play, RefreshCw, AlertTriangle, Loader2, Info } from 'lucide-react';
 import { callVeo, getVideoModel, imageUrlToBase64 } from '@/lib/google-ai';
@@ -65,13 +65,14 @@ export function PairTransitionStudio() {
       const startImageBase64 = await imageUrlToBase64(startScene.generatedImageUrl);
       const endImageBase64 = await imageUrlToBase64(endScene.generatedImageUrl);
 
-      // Build strict prompt — no style inflation
+      // Build strict prompt — scene-aware worker logic
       const strictPrompt = buildStrictTransitionPrompt(
         pair.motionPrompt,
         pair.motionSettings,
         startScene.title,
         endScene.title,
-        endIsRepairScene
+        endIsRepairScene,
+        pair.endSceneIndex
       );
 
       toast.info(`Generating transition ${activePair + 1}→${activePair + 2} via Veo. This may take 2-10 minutes…`);
@@ -192,7 +193,9 @@ export function PairTransitionStudio() {
 
           {/* Worker logic indicator */}
           <div className={`mt-2 p-1.5 rounded text-[10px] ${endIsRepairScene ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-            {endIsRepairScene ? '🔧 Repair transition — tool/equipment evidence required' : '🌫️ Atmosphere transition — no structural changes'}
+            {SCENE_WORKER_PRESENCE[pair.endSceneIndex]
+              ? `${SCENE_WORKER_PRESENCE[pair.endSceneIndex].level === 'required' ? '👷' : SCENE_WORKER_PRESENCE[pair.endSceneIndex].level === 'optional' ? '🔧' : '🌫️'} ${SCENE_WORKER_PRESENCE[pair.endSceneIndex].description}`
+              : endIsRepairScene ? '🔧 Repair transition — tool/equipment evidence required' : '🌫️ Atmosphere transition — no structural changes'}
           </div>
 
           <details className="mt-2">

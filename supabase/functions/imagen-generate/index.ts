@@ -39,12 +39,22 @@ serve(async (req) => {
       console.log(`Using reference image for scene continuity via Imagen 4 style reference`);
     }
 
+    // Scene-aware person generation policy per master prompt:
+    // Scenes 2,3,5,6 (indices 1,2,4,5) REQUIRE workers → allow person generation
+    // Scenes 4,7,8 (indices 3,6,7) workers OPTIONAL → allow person generation
+    // Scenes 1,9 (indices 0,8) NO workers → block person generation
+    const idx = sceneIndex ?? -1;
+    const noWorkersScenes = [0, 8]; // atmosphere-only scenes
+    const personGeneration = noWorkersScenes.includes(idx) ? "DONT_ALLOW" : "ALLOW_ADULT";
+
+    console.log(`Scene ${idx + 1}: personGeneration=${personGeneration}`);
+
     const requestBody = {
       instances: [instances],
       parameters: {
         sampleCount: 1,
         aspectRatio: "9:16",
-        personGeneration: "DONT_ALLOW",
+        personGeneration,
         safetyFilterLevel: "BLOCK_MEDIUM_AND_ABOVE",
       },
     };

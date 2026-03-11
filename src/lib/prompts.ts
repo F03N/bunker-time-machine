@@ -92,10 +92,13 @@ STYLE REQUIREMENTS:
 
 CRITICAL RULES:
 - Every scene must maintain the EXACT same bunker identity, entrance geometry, and camera angle
-- NEVER mention people, workers, humans, hands, or figures in image prompts (image generators cannot render them)
-- For construction scenes (2-8): Show progress through tools, scaffolding, building materials, welding sparks, and equipment
-- For atmosphere scenes (1, 9): Show only environmental state — dust, decay, light, or pristine completion
-- NO magical self-repair. All structural changes must have visible tool/equipment evidence
+- Worker presence is SCENE-AWARE (not globally blocked):
+  • Scene 1 (Before): NO workers — atmosphere only
+  • Scenes 2, 3, 5, 6: Workers REQUIRED — show construction crew arriving, operating tools, repairing, installing. Use worker silhouettes, partial figures, or backlit crew members if full rendering risks quality.
+  • Scenes 4, 7, 8: Workers OPTIONAL — minimal presence or absent, focus on results of their work
+  • Scene 9 (Final Reveal): NO workers — cinematic reveal only
+- If direct human rendering risks image quality, use: worker silhouettes, partial body shots from behind, figures in shadow/backlight, or clearly visible crew activity evidence (hard hats, boots, gloved hands on tools)
+- NO magical self-repair. All structural changes must have visible worker or tool/equipment evidence
 - All motion must be minimal, restrained, and gradual — construction timelapse style`;
 
 /**
@@ -224,17 +227,26 @@ For EACH scene, return a JSON array with objects containing:
   • Highly detailed
   • Natural construction progress
   • Vertical 9:16 format
-  • NEVER mention people, workers, hands, or human figures — image generators cannot render them
-  • For construction scenes (2-8): Show tools, equipment, scaffolding, welding sparks, construction materials to imply worker presence
-  • For atmosphere scenes (1, 9): Show only environmental state — no tools, no construction activity)
+  • Worker presence is SCENE-AWARE:
+    - Scene 1: NO workers. Atmosphere only — abandoned, neglected.
+    - Scene 2: Workers REQUIRED. Construction crew arriving, carrying tools, inspecting site, setting up lighting. Show worker silhouettes or partial figures if full rendering is risky.
+    - Scene 3: Workers REQUIRED. Active debris removal, welding, reinforcing. Workers operating tools visible.
+    - Scene 4: Workers OPTIONAL. Mostly clean exterior, organized surroundings. Minimal worker presence OK.
+    - Scene 5: Workers REQUIRED. Crew opening/accessing bunker entrance. Worker silhouettes entering dark space.
+    - Scene 6: Workers REQUIRED. Installing lighting, repairing walls, laying flooring, running cables. Active crew visible.
+    - Scene 7: Workers OPTIONAL. Clean modern interior, minimal finishing activity.
+    - Scene 8: Workers usually ABSENT. Design reveal — furniture, decor, aesthetics.
+    - Scene 9: NO workers. Cinematic reveal of fully restored space.
+  • If direct human rendering risks quality: use worker silhouettes, partial body shots from behind, figures in shadow/backlight, or hard hats / boots / gloved hands on tools
+  • Never use fully detailed front-facing human faces — use silhouettes, back views, or partial figures instead)
 
 - "motionPrompt": string (A SHORT animation prompt per the master prompt. Simple motion instructions such as:
   • "Dust drifting slowly through abandoned space"
-  • "Tools and equipment appearing at site entrance"
-  • "Sparks from welding, debris slowly clearing"
+  • "Workers arriving with tools, setting up equipment"
+  • "Sparks from welding, workers clearing debris"
   • "Slow cinematic camera push toward clean exterior"
-  • "Light flickering on in dark underground entrance"
-  • "Work lights illuminating interior, cables being laid"
+  • "Worker silhouettes entering dark underground entrance"
+  • "Workers installing lights, laying cables in interior"
   • "Bright lights revealing clean polished surfaces"
   • "Furniture and decor elements settling into position"
   • "Wide cinematic reveal of fully restored space"
@@ -246,7 +258,7 @@ For EACH scene, return a JSON array with objects containing:
 
 CRITICAL RULES (from master prompt):
 - Every prompt must maintain the EXACT same bunker identity, entrance geometry, camera angle, and framing
-- NEVER mention people, workers, humans, hands, or figures in imagePrompt
+- Worker presence follows scene-aware logic (see above) — NOT globally blocked
 - Natural construction progress — show gradual, believable improvement
 - No fantasy elements, no instant transformations
 - No magical self-repair
@@ -302,11 +314,28 @@ export function buildStrictTransitionPrompt(
   settings: { motionStrength: number; cameraIntensity: number; realismPriority: number; morphSuppression: number; continuityStrictness: number },
   startSceneTitle: string,
   endSceneTitle: string,
-  hasRepairActivity: boolean
+  hasRepairActivity: boolean,
+  endSceneIndex?: number
 ): string {
-  const workerNote = hasRepairActivity
-    ? 'Construction progress visible: tools, scaffolding, welding sparks, equipment marks, construction materials present. No magical self-repair.'
-    : 'Atmosphere only: environmental state change (dust, light, decay, or pristine completion). No structural modification, no construction activity.';
+  let workerNote: string;
+  if (endSceneIndex !== undefined) {
+    // Scene-aware worker logic
+    const workerRequired = [1, 2, 4, 5].includes(endSceneIndex);
+    const workerOptional = [3, 6, 7].includes(endSceneIndex);
+    const noWorkers = [0, 8].includes(endSceneIndex);
+    
+    if (workerRequired) {
+      workerNote = 'Workers REQUIRED in end scene: construction crew actively visible (silhouettes, partial figures, or backlit workers operating tools/equipment). Show worker-driven progress.';
+    } else if (workerOptional) {
+      workerNote = 'Workers optional in end scene: minimal presence OK. Focus on results of work (clean surfaces, installed fixtures). Tools and equipment may be visible.';
+    } else {
+      workerNote = 'No workers in end scene: atmosphere only — environmental state (dust, light, decay, or pristine completion). No construction activity.';
+    }
+  } else {
+    workerNote = hasRepairActivity
+      ? 'Construction progress visible: workers, tools, scaffolding, welding sparks, equipment. No magical self-repair.'
+      : 'Atmosphere only: environmental state change. No structural modification, no construction activity.';
+  }
 
   return `${motionPrompt}
 

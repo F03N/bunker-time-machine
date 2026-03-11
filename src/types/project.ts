@@ -48,6 +48,26 @@ export const REPAIR_SCENES: number[] = [1, 2, 3, 4, 5, 6, 7];
  */
 export const ATMOSPHERE_ONLY_SCENES: number[] = [0, 8];
 
+/**
+ * Scene-aware worker presence level per the master prompt.
+ * 'required'  — master prompt explicitly describes worker-driven activity
+ * 'optional'  — workers may appear but are not the focus
+ * 'none'      — no workers present (atmosphere-only)
+ */
+export type WorkerPresence = 'required' | 'optional' | 'none';
+
+export const SCENE_WORKER_PRESENCE: Record<number, { level: WorkerPresence; description: string }> = {
+  0: { level: 'none',     description: 'No workers. Abandoned, neglected atmosphere only.' },
+  1: { level: 'required', description: 'Construction crew arrives. Workers carrying tools, inspecting site, setting up lighting.' },
+  2: { level: 'required', description: 'Active worker-driven repair. Debris removal, welding, reinforcing damaged sections.' },
+  3: { level: 'optional', description: 'Workers optional. Mostly organized near-complete exterior with clean surfaces.' },
+  4: { level: 'required', description: 'Workers opening or accessing bunker entrance. Active entry scene.' },
+  5: { level: 'required', description: 'Worker-driven interior repair. Installing lighting, wall repairs, flooring, cables.' },
+  6: { level: 'optional', description: 'Workers minimal. Clean modern interior, finishing touches.' },
+  7: { level: 'optional', description: 'Workers usually absent. Design reveal with furniture and decor.' },
+  8: { level: 'none',     description: 'No workers. Cinematic reveal of fully restored space.' },
+};
+
 export interface ModelConfig {
   planning: string;
   planningFast: string;
@@ -185,22 +205,73 @@ export function requiresWorkerCues(startSceneIndex: number, endSceneIndex: numbe
  */
 export function getWorkerCuesForScene(sceneIndex: number): string[] {
   const cueMap: Record<number, string[]> = {
-    // Scene 2 — Arrival: crew arrives, carrying tools, inspecting, setting up lighting
-    1: ['tools and materials laid out at entrance', 'portable work lights being set up', 'hard hats and safety equipment visible'],
-    // Scene 3 — Work in Progress (Exterior): debris removal, welding, reinforcing
-    2: ['debris being cleared with heavy equipment', 'welding sparks on steel reinforcement', 'scaffolding erected around damaged sections', 'power tools and welding equipment active'],
-    // Scene 4 — Exterior Near Completion: clean surfaces, fresh concrete
-    3: ['scaffolding nearly complete', 'fresh concrete and clean metal surfaces', 'finishing equipment positioned', 'organized construction materials'],
-    // Scene 5 — Entering Underground: workers open bunker entrance
-    4: ['bunker entrance pried open with tools', 'portable generators and work lights at entrance', 'safety ropes and equipment visible'],
-    // Scene 6 — Interior Work: installing lighting, wall repairs, flooring, cables
-    5: ['interior scaffolding and work lights active', 'wall repair materials and tools', 'cable trays and electrical conduit being installed', 'flooring materials stacked'],
-    // Scene 7 — Interior Finalization: clean, modern, polished
-    6: ['finishing tools and paint equipment', 'lighting fixtures being mounted', 'polished surfaces with protective covers partially removed'],
-    // Scene 8 — Interior Design Transformation: furniture, decorative panels
-    7: ['design furniture being positioned', 'decorative wall panels mounted', 'modern lighting installed and active', 'final adjustments with hand tools'],
+    // Scene 2 — Arrival: crew arrives with tools, inspecting, setting up
+    1: [
+      'construction workers arriving at the site carrying tools and materials',
+      'worker silhouettes inspecting the damaged structure',
+      'portable work lights being set up by crew members',
+      'hard hats and safety equipment visible on workers',
+    ],
+    // Scene 3 — Work in Progress (Exterior): active worker-driven repair
+    2: [
+      'workers actively removing debris with heavy equipment',
+      'welding sparks from workers repairing steel reinforcement',
+      'scaffolding with workers on it around damaged sections',
+      'construction crew operating power tools and welding equipment',
+    ],
+    // Scene 4 — Exterior Near Completion: workers optional, mostly organized
+    3: [
+      'scaffolding nearly complete with minimal worker presence',
+      'fresh concrete and clean metal surfaces',
+      'finishing equipment positioned nearby',
+      'organized construction materials and tools',
+    ],
+    // Scene 5 — Entering Underground: workers opening bunker entrance
+    4: [
+      'workers prying open the heavy bunker entrance door',
+      'crew members with portable generators and work lights at entrance',
+      'worker silhouettes entering the dark underground space',
+      'safety ropes and equipment being used by the team',
+    ],
+    // Scene 6 — Interior Work: worker-driven installation
+    5: [
+      'workers installing lighting systems on interior ceiling',
+      'construction crew repairing walls and laying flooring',
+      'workers running cables and electrical conduit',
+      'interior scaffolding with workers actively operating',
+    ],
+    // Scene 7 — Interior Finalization: workers minimal, finishing touches
+    6: [
+      'minimal worker presence with finishing tools',
+      'lighting fixtures being mounted',
+      'polished surfaces with protective covers partially removed',
+    ],
+    // Scene 8 — Interior Design Transformation: workers usually absent
+    7: [
+      'design furniture being positioned',
+      'decorative wall panels mounted',
+      'modern lighting installed and active',
+    ],
   };
   return cueMap[sceneIndex] || [];
+}
+
+/**
+ * Get the image prompt worker instruction for a specific scene.
+ * Instead of a global "no people" rule, this is scene-aware.
+ */
+export function getWorkerPromptInstruction(sceneIndex: number): string {
+  const presence = SCENE_WORKER_PRESENCE[sceneIndex];
+  if (!presence) return '';
+  
+  switch (presence.level) {
+    case 'required':
+      return 'Include construction workers in this scene — worker silhouettes, partial figures, or clearly visible crew members actively working. If full human rendering risks quality, use worker silhouettes, partial body shots from behind, or figures in shadow/backlight. Workers must be visibly present and driving the activity.';
+    case 'optional':
+      return 'Workers may appear minimally — distant silhouettes or partial presence is acceptable. Focus on the results of their work (clean surfaces, organized materials, installed fixtures) rather than active construction.';
+    case 'none':
+      return 'No workers present in this scene. Show only the environmental state — atmosphere, lighting, and structural condition.';
+  }
 }
 
 /**
