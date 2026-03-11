@@ -4,7 +4,7 @@ import { WorkshopCard } from '@/components/WorkshopCard';
 import { ModelBadge } from '@/components/ModelBadge';
 import { StickyAction } from '@/components/StickyAction';
 import { getActiveModels, SCENE_WORKER_PRESENCE } from '@/types/project';
-import { Download, FolderOpen, Info, Loader2, Check, FileText, Film, Image, Music } from 'lucide-react';
+import { Download, FolderOpen, Info, Loader2, Check, FileText, Film, Image, Music, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 
