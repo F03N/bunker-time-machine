@@ -3,18 +3,19 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
-import { DEFAULT_MOTION_SETTINGS } from '@/types/project';
-import type { TransitionPair, SpeedMultiplier, MotionPreset, VideoProvider } from '@/types/project';
-import { Check, Play, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react';
-import { callVeo, callKling, getVideoModel, imageUrlToBase64 } from '@/lib/google-ai';
+import { DEFAULT_MOTION_SETTINGS, REPAIR_SCENES } from '@/types/project';
+import type { TransitionPair, SpeedMultiplier, MotionPreset } from '@/types/project';
+import { Check, Play, RefreshCw, AlertTriangle, Loader2, Info } from 'lucide-react';
+import { callVeo, getVideoModel, imageUrlToBase64 } from '@/lib/google-ai';
+import { buildStrictTransitionPrompt } from '@/lib/prompts';
 import { toast } from 'sonner';
 
-const MOTION_PRESETS: { value: MotionPreset; label: string }[] = [
-  { value: 'strict-frame-match', label: 'Strict Frame Match' },
-  { value: 'minimal-motion', label: 'Minimal Motion' },
-  { value: 'soft-construction', label: 'Soft Construction' },
-  { value: 'controlled-interior', label: 'Controlled Interior' },
-  { value: 'final-reveal-polish', label: 'Final Reveal Polish' },
+const MOTION_PRESETS: { value: MotionPreset; label: string; desc: string }[] = [
+  { value: 'strict-frame-match', label: 'Strict Frame Match', desc: 'Maximum fidelity to start+end images' },
+  { value: 'minimal-motion', label: 'Minimal Motion', desc: 'Near-static, subtle changes only' },
+  { value: 'soft-construction', label: 'Soft Construction', desc: 'Gentle construction progress' },
+  { value: 'controlled-interior', label: 'Controlled Interior', desc: 'Interior-safe transitions' },
+  { value: 'final-reveal-polish', label: 'Final Reveal Polish', desc: 'Clean reveal moment' },
 ];
 
 const SPEEDS: SpeedMultiplier[] = [1, 2, 3, 4];
@@ -23,7 +24,6 @@ export function PairTransitionStudio() {
   const { scenes, transitions, setTransitions, updateTransition, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
   const [activePair, setActivePair] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [videoProvider, setVideoProvider] = useState<VideoProvider>('kling');
 
   useEffect(() => {
     if (transitions.length === 0) {
@@ -38,7 +38,6 @@ export function PairTransitionStudio() {
         approved: false,
         generating: false,
         motionSettings: { ...DEFAULT_MOTION_SETTINGS[1] },
-        videoProvider: 'kling' as VideoProvider,
       }));
       setTransitions(pairs);
     }
@@ -49,10 +48,11 @@ export function PairTransitionStudio() {
 
   const startScene = scenes[pair.startSceneIndex];
   const endScene = scenes[pair.endSceneIndex];
+  const endIsRepairScene = REPAIR_SCENES.includes(pair.endSceneIndex);
 
   const handleGenerate = async () => {
     setErrorMsg(null);
-    updateTransition(activePair, { generating: true, videoProvider });
+    updateTransition(activePair, { generating: true });
 
     try {
       if (!startScene?.generatedImageUrl) {
@@ -65,64 +65,45 @@ export function PairTransitionStudio() {
       const startImageBase64 = await imageUrlToBase64(startScene.generatedImageUrl);
       const endImageBase64 = await imageUrlToBase64(endScene.generatedImageUrl);
 
-      const presetLabel = MOTION_PRESETS.find(p => p.value === pair.motionPreset)?.label || 'Minimal Motion';
-      const enhancedPrompt = `${pair.motionPrompt}. Style: ${presetLabel}. Construction timelapse, x${pair.speedMultiplier} speed. Minimal camera movement. Same bunker structure, same camera angle, same framing. motionStrength:${pair.motionSettings.motionStrength}/100, realism:${pair.motionSettings.realismPriority}%, continuity:${pair.motionSettings.continuityStrictness}%. No dramatic effects, no morphing, no magical repair.`;
+      // Build strict prompt — no style inflation
+      const strictPrompt = buildStrictTransitionPrompt(
+        pair.motionPrompt,
+        pair.motionSettings,
+        startScene.title,
+        endScene.title,
+        endIsRepairScene
+      );
 
-      if (videoProvider === 'kling') {
-        toast.info(`Generating transition ${activePair + 1}→${activePair + 2} via Kling. This may take 2-10 minutes…`);
+      toast.info(`Generating transition ${activePair + 1}→${activePair + 2} via Veo. This may take 2-10 minutes…`);
 
-        const result = await callKling({
-          prompt: enhancedPrompt,
-          startImageBase64,
-          endImageBase64: pair.frameMode === 'start-end' ? endImageBase64 : undefined,
-          pairIndex: activePair,
-          projectName: name.replace(/\s+/g, '_') || 'project',
-          klingVersion: '2.6',
-          klingMode: qualityMode === 'fast' ? 'std' : 'pro',
-          duration: 5,
+      const result = await callVeo({
+        prompt: strictPrompt,
+        model: getVideoModel(qualityMode),
+        startImageBase64,
+        endImageBase64,
+        pairIndex: activePair,
+        projectName: name.replace(/\s+/g, '_') || 'project',
+      });
+
+      if (result.videoUrl) {
+        updateTransition(activePair, {
+          generating: false,
+          generatedVideoUrl: result.videoUrl,
         });
-
-        if (result.videoUrl) {
-          updateTransition(activePair, {
-            generating: false,
-            generatedVideoUrl: result.videoUrl,
-          });
-          toast.success(`Transition ${activePair + 1}→${activePair + 2} complete (Kling)`);
-        } else {
-          throw new Error('No video URL returned from Kling');
-        }
+        toast.success(`Transition ${activePair + 1}→${activePair + 2} complete`);
       } else {
-        toast.info(`Generating transition ${activePair + 1}→${activePair + 2} via Veo. This may take 2-5 minutes…`);
-
-        const result = await callVeo({
-          prompt: enhancedPrompt,
-          model: getVideoModel(qualityMode),
-          startImageBase64,
-          endImageBase64: pair.frameMode === 'start-end' ? endImageBase64 : undefined,
-          pairIndex: activePair,
-          projectName: name.replace(/\s+/g, '_') || 'project',
-        });
-
-        if (result.videoUrl) {
-          updateTransition(activePair, {
-            generating: false,
-            generatedVideoUrl: result.videoUrl,
-          });
-          toast.success(`Transition ${activePair + 1}→${activePair + 2} complete (Veo)`);
-        } else {
-          throw new Error(result.message || 'No video URL returned');
-        }
+        throw new Error(result.message || 'No video URL returned');
       }
     } catch (err) {
       console.error('Transition generation failed:', err);
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      const isRateLimit = msg.includes('429') || msg.includes('RATE_LIMITED') || msg.includes('quota') || msg.includes('حصة');
+      const isRateLimit = msg.includes('429') || msg.includes('RATE_LIMITED') || msg.includes('quota');
       setErrorMsg(isRateLimit
-        ? 'تم تجاوز حصة API. انتظر بضع دقائق ثم حاول مرة أخرى.'
+        ? 'API quota exceeded. Wait a few minutes and try again.'
         : msg);
       updateTransition(activePair, { generating: false });
       toast.error(isRateLimit
-        ? 'تم تجاوز حصة API — حاول مرة أخرى بعد دقائق'
+        ? 'API quota exceeded — try again in a few minutes'
         : `Transition failed: ${msg}`);
     }
   };
@@ -148,31 +129,7 @@ export function PairTransitionStudio() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Pair Transition Studio</h1>
-        <p className="text-sm text-muted-foreground">Generate transitions pair by pair. Start + End frames.</p>
-      </div>
-
-      {/* Video Provider Toggle */}
-      <div className="flex gap-2 px-1">
-        <button
-          onClick={() => setVideoProvider('kling')}
-          className={`flex-1 px-3 py-2 rounded-md text-xs font-bold transition-all ${
-            videoProvider === 'kling'
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-secondary text-muted-foreground'
-          }`}
-        >
-          🎬 Kling (PiAPI)
-        </button>
-        <button
-          onClick={() => setVideoProvider('veo')}
-          className={`flex-1 px-3 py-2 rounded-md text-xs font-bold transition-all ${
-            videoProvider === 'veo'
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-secondary text-muted-foreground'
-          }`}
-        >
-          🎥 Veo 3.1 (KIE)
-        </button>
+        <p className="text-sm text-muted-foreground">Image A → Image B. Strict pair transitions via Google Veo.</p>
       </div>
 
       {/* Pair selector */}
@@ -212,7 +169,7 @@ export function PairTransitionStudio() {
       <div className="flex flex-col">
         <WorkshopCard className="rounded-b-none border-b-0">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Start Frame</span>
+            <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Start Frame (Image A)</span>
             <span className="text-xs font-semibold">Scene {pair.startSceneIndex + 1}</span>
           </div>
           {startScene?.generatedImageUrl ? (
@@ -232,11 +189,17 @@ export function PairTransitionStudio() {
             </span>
             <div className="flex-1 h-[2px] bg-primary/60" />
           </div>
+
+          {/* Worker logic indicator */}
+          <div className={`mt-2 p-1.5 rounded text-[10px] ${endIsRepairScene ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+            {endIsRepairScene ? '🔧 Repair transition — tool/equipment evidence required' : '🌫️ Atmosphere transition — no structural changes'}
+          </div>
+
           <details className="mt-2">
             <summary className="text-xs text-muted-foreground cursor-pointer">Motion settings</summary>
             <div className="mt-2 space-y-3">
               <div>
-                <label className="text-xs text-muted-foreground">Motion Prompt</label>
+                <label className="text-xs text-muted-foreground">Motion Prompt (pair-specific)</label>
                 <p className="text-xs font-mono text-primary mt-0.5">{pair.motionPrompt}</p>
               </div>
               <div>
@@ -247,6 +210,7 @@ export function PairTransitionStudio() {
                       key={p.value}
                       onClick={() => updateTransition(activePair, { motionPreset: p.value })}
                       className={`px-2 py-1 rounded text-[10px] font-semibold ${pair.motionPreset === p.value ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}
+                      title={p.desc}
                     >
                       {p.label}
                     </button>
@@ -282,7 +246,7 @@ export function PairTransitionStudio() {
         {/* End Image */}
         <WorkshopCard className="rounded-t-none border-t-0">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">End Frame</span>
+            <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">End Frame (Image B)</span>
             <span className="text-xs font-semibold">Scene {pair.endSceneIndex + 1}</span>
           </div>
           {endScene?.generatedImageUrl ? (
@@ -324,9 +288,9 @@ export function PairTransitionStudio() {
               {pair.generating ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Generating via {videoProvider === 'kling' ? 'Kling' : 'Veo'}…
+                  Generating via Veo…
                 </span>
-              ) : `Generate ${activePair + 1}→${activePair + 2} (${videoProvider === 'kling' ? 'Kling' : 'Veo'})`}
+              ) : `Generate ${activePair + 1}→${activePair + 2}`}
             </Button>
             {(!startScene?.generatedImageUrl || !endScene?.generatedImageUrl) && (
               <p className="text-xs text-destructive mt-2 text-center">Both scene images required</p>
@@ -335,9 +299,14 @@ export function PairTransitionStudio() {
         )}
 
         <div className="mt-3 p-2 rounded bg-secondary">
-          <p className="text-[10px] text-muted-foreground">
-            <span className="font-semibold">Provider:</span> {videoProvider === 'kling' ? 'Kling v2.6 via PiAPI — Image-to-Video with start + end frames.' : 'Veo 3.1 via KIE.AI — Start + End Frames (FIRST_AND_LAST_FRAMES_2_VIDEO).'}
-          </p>
+          <div className="flex items-start gap-1.5">
+            <Info className="w-3 h-3 text-muted-foreground shrink-0 mt-0.5" />
+            <div className="text-[10px] text-muted-foreground space-y-1">
+              <p><span className="font-semibold">Provider:</span> Google Veo 3.1 — Start image guided generation.</p>
+              <p><span className="font-semibold">Frame mode:</span> Start image is used as the initial frame. End image is used as a visual target/guide — Veo does not guarantee exact end-frame matching.</p>
+              <p><span className="font-semibold">Behavior:</span> Image A evolving toward Image B with strict constraints.</p>
+            </div>
+          </div>
         </div>
       </WorkshopCard>
 

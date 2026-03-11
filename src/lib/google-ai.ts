@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { QualityMode, VideoProvider } from '@/types/project';
+import type { QualityMode } from '@/types/project';
 import { getActiveModels } from '@/types/project';
 
 interface GeminiRequest {
@@ -39,24 +39,6 @@ interface VeoResponse {
   storagePath?: string;
 }
 
-interface KlingRequest {
-  prompt: string;
-  startImageBase64: string;
-  endImageBase64?: string;
-  pairIndex: number;
-  projectName: string;
-  klingVersion?: string;
-  klingMode?: string;
-  duration?: number;
-}
-
-interface KlingResponse {
-  videoUrl?: string;
-  status: string;
-  taskId?: string;
-  storagePath?: string;
-}
-
 export async function callGemini({ messages, model, systemPrompt }: GeminiRequest): Promise<string> {
   const { data, error } = await supabase.functions.invoke('gemini-generate', {
     body: { messages, model, systemPrompt },
@@ -86,117 +68,70 @@ export async function callImagen(req: ImagenRequest): Promise<ImagenResponse> {
 }
 
 export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
-  // Step 1: Start the task via KIE.AI
-  const { data: startData, error: startError } = await supabase.functions.invoke('veo-generate', {
-    body: { ...req, mode: 'start' },
+  const { data, error } = await supabase.functions.invoke('veo-generate', {
+    body: req,
   });
 
-  if (startError) throw new Error(`Veo error: ${startError.message}`);
-  if (startData?.error) throw new Error(`${startData.error}${startData.details ? ': ' + startData.details : ''}`);
+  if (error) throw new Error(`Veo error: ${error.message}`);
+  if (data?.error) throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
 
-  const taskId = startData.taskId || startData.operationName;
-  if (startData.status !== 'started' || !taskId) {
-    throw new Error(startData.error || 'Failed to start Veo task');
+  // Veo via Google AI Studio is synchronous or returns a video URL
+  if (data.videoUrl) {
+    return {
+      videoUrl: data.videoUrl,
+      status: 'complete',
+      operationName: data.operationName,
+      storagePath: data.storagePath,
+    };
   }
 
-  // Step 2: Poll for completion
-  const maxPolls = 120; // 120 * 5s = 10 minutes (KIE can take longer)
-  const pollInterval = 5000;
+  // If polling is needed (long-running operation)
+  if (data.operationName && data.status === 'started') {
+    const maxPolls = 120;
+    const pollInterval = 5000;
 
-  for (let i = 0; i < maxPolls; i++) {
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
 
-    const { data: pollData, error: pollError } = await supabase.functions.invoke('veo-generate', {
-      body: {
-        mode: 'poll',
-        taskId,
-        operationName: taskId,
-        projectName: req.projectName,
-        pairIndex: req.pairIndex,
-      },
-    });
+      const { data: pollData, error: pollError } = await supabase.functions.invoke('veo-generate', {
+        body: {
+          mode: 'poll',
+          operationName: data.operationName,
+          projectName: req.projectName,
+          pairIndex: req.pairIndex,
+        },
+      });
 
-    if (pollError) {
-      console.warn(`Poll ${i + 1} error:`, pollError.message);
-      continue;
-    }
-
-    if (pollData?.done) {
-      if (pollData.status === 'error') {
-        throw new Error(pollData.error || 'Veo generation failed');
+      if (pollError) {
+        console.warn(`Poll ${i + 1} error:`, pollError.message);
+        continue;
       }
-      return {
-        videoUrl: pollData.videoUrl,
-        status: 'complete',
-        operationName: taskId,
-        storagePath: pollData.storagePath,
-      };
-    }
-  }
 
-  throw new Error(`Video generation timed out after 10 minutes. Task: ${taskId}`);
-}
-
-export async function callKling(req: KlingRequest): Promise<KlingResponse> {
-  // Step 1: Start the task
-  const { data: startData, error: startError } = await supabase.functions.invoke('kling-generate', {
-    body: { ...req, mode: 'start' },
-  });
-
-  if (startError) throw new Error(`Kling error: ${startError.message}`);
-  if (startData?.error) throw new Error(`${startData.error}`);
-
-  if (startData.status !== 'started' || !startData.taskId) {
-    throw new Error(startData.error || 'Failed to start Kling task');
-  }
-
-  const taskId = startData.taskId;
-
-  // Step 2: Poll for completion
-  const maxPolls = 120; // 120 * 5s = 10 minutes (Kling can be slower)
-  const pollInterval = 5000;
-
-  for (let i = 0; i < maxPolls; i++) {
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
-
-    const { data: pollData, error: pollError } = await supabase.functions.invoke('kling-generate', {
-      body: {
-        mode: 'poll',
-        taskId,
-        projectName: req.projectName,
-        pairIndex: req.pairIndex,
-      },
-    });
-
-    if (pollError) {
-      console.warn(`Kling poll ${i + 1} error:`, pollError.message);
-      continue;
-    }
-
-    if (pollData?.done) {
-      if (pollData.status === 'error') {
-        throw new Error(pollData.error || 'Kling generation failed');
+      if (pollData?.done) {
+        if (pollData.status === 'error') {
+          throw new Error(pollData.error || 'Veo generation failed');
+        }
+        return {
+          videoUrl: pollData.videoUrl,
+          status: 'complete',
+          operationName: data.operationName,
+          storagePath: pollData.storagePath,
+        };
       }
-      return {
-        videoUrl: pollData.videoUrl,
-        status: 'complete',
-        taskId,
-        storagePath: pollData.storagePath,
-      };
     }
+
+    throw new Error(`Video generation timed out after 10 minutes.`);
   }
 
-  throw new Error(`Kling video generation timed out after 10 minutes. Task: ${taskId}`);
+  throw new Error(data.message || 'No video URL returned from Veo');
 }
 
 export function getImageModel(quality: QualityMode): string {
-  const models = getActiveModels(quality);
-  return models.image;
+  return getActiveModels(quality).image;
 }
 
 export function getVideoModel(quality: QualityMode): string {
-  const models = getActiveModels(quality);
-  return models.video;
+  return getActiveModels(quality).video;
 }
 
 export function getPlanningModel(quality: QualityMode): string {
@@ -205,14 +140,12 @@ export function getPlanningModel(quality: QualityMode): string {
 
 /**
  * Convert a storage URL or data URL to base64 string.
- * Used for chaining scene images as references.
  */
 export async function imageUrlToBase64(url: string): Promise<string> {
   if (url.startsWith('data:')) {
     return url.split(',')[1];
   }
 
-  // For storage URLs, fetch through a proxy or re-download
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to fetch image');
