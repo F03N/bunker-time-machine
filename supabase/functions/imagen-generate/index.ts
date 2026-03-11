@@ -10,75 +10,84 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
+    if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY is not configured");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error("Supabase config missing");
 
-    const { prompt, referenceImageBase64, sceneIndex, projectName } = await req.json();
-
+    const { prompt, model, referenceImageBase64, sceneIndex, projectName } = await req.json();
     if (!prompt) throw new Error("prompt is required");
 
-    // Use Gemini image generation model via Lovable AI Gateway
-    const model = "google/gemini-3-pro-image-preview";
+    // Use actual Imagen 4 API via Google AI Studio
+    const imagenModel = model || "imagen-4.0-generate-001";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imagenModel}:predict?key=${GOOGLE_AI_API_KEY}`;
 
-    // Build messages - if we have a reference image, include it for visual continuity
-    const userContent: any[] = [];
+    // Build Imagen 4 request
+    const instances: any = { prompt };
 
+    // If reference image provided, include as reference for structural continuity
     if (referenceImageBase64) {
-      userContent.push({
-        type: "text",
-        text: `You are generating the next scene in a bunker restoration timelapse sequence. Use the provided reference image as visual guidance for the bunker's identity, camera angle, structure, and environment. Generate a NEW image that shows the next stage of restoration based on this prompt:\n\n${prompt}\n\nCRITICAL: Maintain the EXACT same bunker structure, entrance geometry, camera angle, and surrounding environment from the reference image. Only change the restoration progress as described in the prompt. Output format: 9:16 vertical, photorealistic.`,
-      });
-      userContent.push({
-        type: "image_url",
-        image_url: {
-          url: `data:image/png;base64,${referenceImageBase64}`,
-        },
-      });
-    } else {
-      userContent.push({
-        type: "text",
-        text: `Generate a photorealistic image based on this prompt:\n\n${prompt}\n\nOutput format: 9:16 vertical, photorealistic. Do not include any text or watermarks.`,
-      });
+      const cleanBase64 = referenceImageBase64.includes(",")
+        ? referenceImageBase64.split(",")[1]
+        : referenceImageBase64;
+      instances.referenceImages = [{
+        referenceImage: { bytesBase64Encoded: cleanBase64 },
+        referenceType: "STYLE_IMAGE",
+      }];
+      console.log(`Using reference image for scene continuity via Imagen 4 style reference`);
     }
 
-    console.log(`Calling ${model}, prompt length: ${prompt.length}, hasReference: ${!!referenceImageBase64}`);
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
+    const requestBody = {
+      instances: [instances],
+      parameters: {
+        sampleCount: 1,
+        aspectRatio: "9:16",
+        personGeneration: "DONT_ALLOW",
+        safetyFilterLevel: "BLOCK_MEDIUM_AND_ABOVE",
       },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: userContent }],
-        modalities: ["image", "text"],
-      }),
+    };
+
+    console.log(`Calling Imagen 4: model=${imagenModel}, prompt length=${prompt.length}, hasReference=${!!referenceImageBase64}`);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
+      console.error("Imagen 4 API error:", response.status, errorText);
+
+      if (response.status === 429) {
+        return new Response(JSON.stringify({
+          error: "API quota exceeded. Wait a few minutes and try again.",
+          errorCode: "RATE_LIMITED",
+        }), {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       return new Response(JSON.stringify({
-        error: `AI Gateway error (${response.status})`,
-        details: errorText,
+        error: `Imagen 4 API error (${response.status})`,
+        details: errorText.substring(0, 500),
       }), {
-        status: response.status === 429 ? 429 : 500,
+        status: response.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const data = await response.json();
-    const imageData = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
-    if (!imageData) {
-      console.error("No image in response:", JSON.stringify(data).substring(0, 500));
+    // Extract image from Imagen 4 response
+    const prediction = data.predictions?.[0];
+    if (!prediction?.bytesBase64Encoded) {
+      console.error("No image in Imagen 4 response:", JSON.stringify(data).substring(0, 500));
       return new Response(JSON.stringify({
-        error: "No image generated",
+        error: "No image generated by Imagen 4",
         details: "The model did not return an image. Try simplifying the prompt.",
         raw: JSON.stringify(data).substring(0, 1000),
       }), {
@@ -87,8 +96,7 @@ serve(async (req) => {
       });
     }
 
-    // Extract base64 from data URL
-    const imageBase64 = imageData.startsWith("data:") ? imageData.split(",")[1] : imageData;
+    const imageBase64 = prediction.bytesBase64Encoded;
 
     // Upload to Cloud storage
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
