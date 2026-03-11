@@ -92,10 +92,13 @@ STYLE REQUIREMENTS:
 
 CRITICAL RULES:
 - Every scene must maintain the EXACT same bunker identity, entrance geometry, and camera angle
-- NEVER mention people, workers, humans, hands, or figures in image prompts (image generators cannot render them)
-- For construction scenes (2-8): Show progress through tools, scaffolding, building materials, welding sparks, and equipment
-- For atmosphere scenes (1, 9): Show only environmental state — dust, decay, light, or pristine completion
-- NO magical self-repair. All structural changes must have visible tool/equipment evidence
+- Worker presence is SCENE-AWARE (not globally blocked):
+  • Scene 1 (Before): NO workers — atmosphere only
+  • Scenes 2, 3, 5, 6: Workers REQUIRED — show construction crew arriving, operating tools, repairing, installing. Use worker silhouettes, partial figures, or backlit crew members if full rendering risks quality.
+  • Scenes 4, 7, 8: Workers OPTIONAL — minimal presence or absent, focus on results of their work
+  • Scene 9 (Final Reveal): NO workers — cinematic reveal only
+- If direct human rendering risks image quality, use: worker silhouettes, partial body shots from behind, figures in shadow/backlight, or clearly visible crew activity evidence (hard hats, boots, gloved hands on tools)
+- NO magical self-repair. All structural changes must have visible worker or tool/equipment evidence
 - All motion must be minimal, restrained, and gradual — construction timelapse style`;
 
 /**
