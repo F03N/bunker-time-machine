@@ -159,6 +159,12 @@ export interface AudioData {
   ambienceNotes: string[];
   sfxNotes: string[];
   ttsReady: boolean;
+  /** URLs of generated audio files per scene (index-matched to sceneNarrations) */
+  generatedAudioUrls: string[];
+  /** URL of full combined narration audio (if generated) */
+  fullAudioUrl?: string;
+  /** Whether TTS audio has been generated (not just script text) */
+  audioGenerated: boolean;
 }
 
 export interface ProjectState {
