@@ -5,6 +5,7 @@ import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
 import { Check, RefreshCw, ImageIcon, AlertTriangle } from 'lucide-react';
 import { callImagen, getImageModel, imageUrlToBase64 } from '@/lib/google-ai';
+import { getWorkerPromptInstruction } from '@/types/project';
 import { toast } from 'sonner';
 
 export function SceneImageChain() {
