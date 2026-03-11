@@ -35,22 +35,6 @@ serve(async (req) => {
   }
 });
 
-async function uploadBase64ToStorage(supabase: any, base64: string, projectName: string, label: string): Promise<string> {
-  const cleanBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
-  const bytes = Uint8Array.from(atob(cleanBase64), c => c.charCodeAt(0));
-  const safeName = (projectName || "project").replace(/[^a-zA-Z0-9_-]/g, "_");
-  const fileName = `${safeName}/frames/${label}_${Date.now()}.png`;
-
-  const { error } = await supabase.storage
-    .from("bunker-assets")
-    .upload(fileName, bytes, { contentType: "image/png", upsert: true });
-
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-
-  const { data } = supabase.storage.from("bunker-assets").getPublicUrl(fileName);
-  return data.publicUrl;
-}
-
 async function handleGenerate(body: any, apiKey: string, supabase: any) {
   const { prompt, model, startImageBase64, endImageBase64, projectName, pairIndex } = body;
   if (!prompt) throw new Error("prompt is required");
@@ -58,38 +42,34 @@ async function handleGenerate(body: any, apiKey: string, supabase: any) {
   const veoModel = model || "veo-3.1-generate-preview";
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${veoModel}:predictLongRunning?key=${apiKey}`;
 
-  // Build the request for Google AI Studio Veo API
-  const instances: any = {
-    prompt,
-  };
+  // Build the request — strict pair transition: Image A as start frame
+  const instances: any = { prompt };
 
-  // Upload start image to storage and use as reference
   if (startImageBase64) {
-    const startUrl = await uploadBase64ToStorage(supabase, startImageBase64, projectName, `start_${pairIndex}`);
-    instances.image = {
-      bytesBase64Encoded: startImageBase64.includes(",") ? startImageBase64.split(",")[1] : startImageBase64,
-    };
-    console.log(`Using start frame as initial image for Veo`);
+    const cleanBase64 = startImageBase64.includes(",") ? startImageBase64.split(",")[1] : startImageBase64;
+    instances.image = { bytesBase64Encoded: cleanBase64 };
+    console.log(`Using start frame (Image A) as initial image for Veo`);
   }
 
-  // Note: Veo 3.1 via Google AI Studio supports start image guidance.
-  // End image is NOT directly supported as an exact end-frame.
-  // We include end image context in the prompt for guidance.
+  // Veo 3.1 does NOT support exact end-frame matching.
+  // End image is included in prompt context only as a visual guide.
   if (endImageBase64) {
-    console.log(`End image provided as visual target/guide (not exact end-frame — Veo limitation)`);
+    console.log(`End image (Image B) provided as visual target/guide — NOT exact end-frame (Veo limitation)`);
   }
 
+  // Scene-aware person generation for video transitions
+  // Allow workers in video since the prompt controls their presence per scene
   const requestBody = {
     instances: [instances],
     parameters: {
       aspectRatio: "9:16",
       sampleCount: 1,
       durationSeconds: 5,
-      personGeneration: "dont_allow",
+      personGeneration: "allow_adult",
     },
   };
 
-  console.log(`Starting Veo generation via Google AI Studio: model=${veoModel}`);
+  console.log(`Starting Veo generation: model=${veoModel}, pairIndex=${pairIndex}`);
 
   const response = await fetch(apiUrl, {
     method: "POST",
@@ -122,7 +102,7 @@ async function handleGenerate(body: any, apiKey: string, supabase: any) {
 
   const data = await response.json();
 
-  // Check if it's a long-running operation
+  // Long-running operation
   if (data.name) {
     console.log(`Veo long-running operation started: ${data.name}`);
     return new Response(JSON.stringify({
@@ -133,7 +113,7 @@ async function handleGenerate(body: any, apiKey: string, supabase: any) {
     });
   }
 
-  // Synchronous result (unlikely for video but handle it)
+  // Synchronous result
   const videoData = data.predictions?.[0]?.video;
   if (videoData?.bytesBase64Encoded) {
     const videoBytes = Uint8Array.from(atob(videoData.bytesBase64Encoded), c => c.charCodeAt(0));
@@ -176,7 +156,6 @@ async function handlePoll(operationName: string, apiKey: string, supabase: any, 
   if (!operationName) throw new Error("operationName is required for polling");
 
   const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
-
   console.log(`Polling Veo operation: ${operationName}`);
 
   const response = await fetch(pollUrl);
@@ -195,15 +174,11 @@ async function handlePoll(operationName: string, apiKey: string, supabase: any, 
   const data = await response.json();
 
   if (!data.done) {
-    return new Response(JSON.stringify({
-      status: "polling",
-      done: false,
-    }), {
+    return new Response(JSON.stringify({ status: "polling", done: false }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  // Operation completed
   if (data.error) {
     return new Response(JSON.stringify({
       status: "error",
@@ -215,7 +190,6 @@ async function handlePoll(operationName: string, apiKey: string, supabase: any, 
     });
   }
 
-  // Extract video from response
   const videoData = data.response?.predictions?.[0]?.video || data.response?.generatedSamples?.[0]?.video;
 
   if (!videoData?.bytesBase64Encoded && !videoData?.uri) {
@@ -230,7 +204,6 @@ async function handlePoll(operationName: string, apiKey: string, supabase: any, 
     });
   }
 
-  // If we have a URI, download it
   let videoBytes: Uint8Array;
   if (videoData.uri) {
     const dlResponse = await fetch(videoData.uri);
@@ -249,7 +222,6 @@ async function handlePoll(operationName: string, apiKey: string, supabase: any, 
     videoBytes = Uint8Array.from(atob(videoData.bytesBase64Encoded), c => c.charCodeAt(0));
   }
 
-  // Upload to storage
   const safeName = (projectName || "project").replace(/[^a-zA-Z0-9_-]/g, "_");
   const fileName = `${safeName}/transitions/transition_${(pairIndex ?? 0) + 1}_${Date.now()}.mp4`;
 
