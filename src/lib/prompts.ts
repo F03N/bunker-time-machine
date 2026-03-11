@@ -314,11 +314,28 @@ export function buildStrictTransitionPrompt(
   settings: { motionStrength: number; cameraIntensity: number; realismPriority: number; morphSuppression: number; continuityStrictness: number },
   startSceneTitle: string,
   endSceneTitle: string,
-  hasRepairActivity: boolean
+  hasRepairActivity: boolean,
+  endSceneIndex?: number
 ): string {
-  const workerNote = hasRepairActivity
-    ? 'Construction progress visible: tools, scaffolding, welding sparks, equipment marks, construction materials present. No magical self-repair.'
-    : 'Atmosphere only: environmental state change (dust, light, decay, or pristine completion). No structural modification, no construction activity.';
+  let workerNote: string;
+  if (endSceneIndex !== undefined) {
+    // Scene-aware worker logic
+    const workerRequired = [1, 2, 4, 5].includes(endSceneIndex);
+    const workerOptional = [3, 6, 7].includes(endSceneIndex);
+    const noWorkers = [0, 8].includes(endSceneIndex);
+    
+    if (workerRequired) {
+      workerNote = 'Workers REQUIRED in end scene: construction crew actively visible (silhouettes, partial figures, or backlit workers operating tools/equipment). Show worker-driven progress.';
+    } else if (workerOptional) {
+      workerNote = 'Workers optional in end scene: minimal presence OK. Focus on results of work (clean surfaces, installed fixtures). Tools and equipment may be visible.';
+    } else {
+      workerNote = 'No workers in end scene: atmosphere only — environmental state (dust, light, decay, or pristine completion). No construction activity.';
+    }
+  } else {
+    workerNote = hasRepairActivity
+      ? 'Construction progress visible: workers, tools, scaffolding, welding sparks, equipment. No magical self-repair.'
+      : 'Atmosphere only: environmental state change. No structural modification, no construction activity.';
+  }
 
   return `${motionPrompt}
 
