@@ -230,7 +230,9 @@ export function ContinuityReview() {
             <div>
               <h3 className="font-bold text-sm">Scene {selectedScene + 1}: {scenes[selectedScene].title}</h3>
               <span className={`text-[10px] font-semibold ${REPAIR_SCENES.includes(selectedScene) ? 'text-primary' : 'text-muted-foreground'}`}>
-                {REPAIR_SCENES.includes(selectedScene) ? '🔧 Construction Scene — Tools/Equipment Required' : '🌫️ Atmosphere Only — No Construction'}
+                {SCENE_WORKER_PRESENCE[selectedScene]
+                  ? `${SCENE_WORKER_PRESENCE[selectedScene].level === 'required' ? '👷' : SCENE_WORKER_PRESENCE[selectedScene].level === 'optional' ? '🔧' : '🌫️'} ${SCENE_WORKER_PRESENCE[selectedScene].description}`
+                  : ''}
               </span>
             </div>
             <button onClick={() => setSelectedScene(null)}>

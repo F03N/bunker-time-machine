@@ -192,7 +192,9 @@ export function PairTransitionStudio() {
 
           {/* Worker logic indicator */}
           <div className={`mt-2 p-1.5 rounded text-[10px] ${endIsRepairScene ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-            {endIsRepairScene ? '🔧 Repair transition — tool/equipment evidence required' : '🌫️ Atmosphere transition — no structural changes'}
+            {SCENE_WORKER_PRESENCE[pair.endSceneIndex]
+              ? `${SCENE_WORKER_PRESENCE[pair.endSceneIndex].level === 'required' ? '👷' : SCENE_WORKER_PRESENCE[pair.endSceneIndex].level === 'optional' ? '🔧' : '🌫️'} ${SCENE_WORKER_PRESENCE[pair.endSceneIndex].description}`
+              : endIsRepairScene ? '🔧 Repair transition — tool/equipment evidence required' : '🌫️ Atmosphere transition — no structural changes'}
           </div>
 
           <details className="mt-2">
