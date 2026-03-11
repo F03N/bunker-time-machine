@@ -3,8 +3,8 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { ModelBadge } from '@/components/ModelBadge';
 import { StickyAction } from '@/components/StickyAction';
-import { getActiveModels, REPAIR_SCENES, SCENE_WORKER_PRESENCE } from '@/types/project';
-import { Download, FolderOpen, Info, Loader2 } from 'lucide-react';
+import { getActiveModels, SCENE_WORKER_PRESENCE } from '@/types/project';
+import { Download, FolderOpen, Info, Loader2, Check, FileText, Film, Image, Music } from 'lucide-react';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 
@@ -16,6 +16,8 @@ export function ExportCenter() {
 
   const sceneImages = scenes.filter(s => s.generatedImageUrl).length;
   const transitionClips = transitions.filter(t => t.generatedVideoUrl).length;
+  const hasAudioFiles = (audio.generatedAudioUrls || []).filter(Boolean).length > 0;
+  const hasScript = audio.fullScript.length > 0;
 
   const buildManifest = () => ({
     project: name,
@@ -38,16 +40,16 @@ export function ExportCenter() {
     },
     storyStructure: '9-scene mandatory structure per master prompt',
     providerCapability: {
-      imageGeneration: 'Google Imagen 4 — real API via GOOGLE_AI_API_KEY. Scene-aware personGeneration (ALLOW_ADULT for worker scenes, DONT_ALLOW for atmosphere scenes).',
-      videoGeneration: 'Google Veo 3.1 — start-image guided generation. End image = visual target/guide, NOT exact end-frame match.',
-      tts: 'Google Gemini TTS — text-to-speech for narration (if enabled)',
-      planning: 'Google Gemini 2.5 Pro/Flash — scene planning and continuity analysis',
+      imageGeneration: 'Google Imagen 4 — scene-aware personGeneration. STYLE_IMAGE reference for continuity.',
+      videoGeneration: 'Google Veo 3.1 — start-image + STYLE_IMAGE end-frame guide. NOT exact end-frame match.',
+      tts: 'Google Gemini TTS — real audio generation for narration.',
+      planning: 'Google Gemini 2.5 Pro/Flash — scene planning and visual continuity analysis.',
     },
     limitations: [
-      'Veo 3.1 uses start image as initial frame. End image serves as visual guide — exact end-frame match is NOT guaranteed.',
-      'Imagen 4 reference image uses STYLE_IMAGE type for continuity, not pixel-exact structural reference.',
-      'Worker rendering quality varies — silhouettes and partial figures are used as fallback.',
-      'Final assembly is designed for CapCut — assets are exported as individual files, not as a timeline.',
+      'Veo 3.1: End image serves as visual guide only — exact end-frame match is NOT guaranteed.',
+      'Imagen 4: STYLE_IMAGE reference provides style consistency, not pixel-exact structural lock.',
+      'Worker rendering: Silhouettes and partial figures used as quality fallback.',
+      'Export: Individual asset files for CapCut manual assembly — not an auto-edited timeline.',
     ],
     workerPresenceMap: Object.fromEntries(
       Object.entries(SCENE_WORKER_PRESENCE).map(([k, v]) => [`scene_${Number(k) + 1}`, v])
@@ -62,22 +64,20 @@ export function ExportCenter() {
       notes: s.notes,
       workerCues: s.workerCues || [],
       hasImage: !!s.generatedImageUrl,
-      assetPath: s.generatedImageUrl ? `scenes/scene_${i + 1}.png` : null,
+      assetFile: s.generatedImageUrl ? `scenes/scene_${String(i + 1).padStart(2, '0')}.png` : null,
     })),
     transitions: transitions.map((t) => ({
       pair: `${t.startSceneIndex + 1}→${t.endSceneIndex + 1}`,
       motionPrompt: t.motionPrompt,
-      motionPreset: t.motionPreset,
       speed: `x${t.speedMultiplier}`,
-      frameMode: t.frameMode,
       hasVideo: !!t.generatedVideoUrl,
       settings: t.motionSettings,
-      assetPath: t.generatedVideoUrl ? `transitions/transition_${t.startSceneIndex + 1}_to_${t.endSceneIndex + 1}.mp4` : null,
+      assetFile: t.generatedVideoUrl ? `transitions/transition_${String(t.startSceneIndex + 1).padStart(2, '0')}_to_${String(t.endSceneIndex + 1).padStart(2, '0')}.mp4` : null,
     })),
     audio: {
-      hasScript: audio.fullScript.length > 0,
+      hasScript: hasScript,
+      hasAudioFiles,
       ttsReady: audio.ttsReady,
-      assetPath: audio.fullScript ? 'audio/narration_script.txt' : null,
     },
     continuityFlags: continuityFlags.map(f => ({
       sceneIndex: f.sceneIndex + 1,
@@ -87,6 +87,76 @@ export function ExportCenter() {
     })),
   });
 
+  const buildCapCutGuide = () => `BUNKER TIME LAPSE — CapCut Assembly Guide
+=============================================
+Project: ${name}
+Concept: ${selectedIdea?.title || 'N/A'}
+Environment: ${selectedIdea?.environmentType || 'N/A'}
+Quality Mode: ${qualityMode}
+Models: Imagen 4 (images) + Veo 3.1 (transitions) + Gemini TTS (audio)
+
+TIMELINE ORDER
+==============
+Place assets on the CapCut timeline in this EXACT order:
+
+  1. scene_01.png
+  2. transition_01_to_02.mp4
+  3. scene_02.png
+  4. transition_02_to_03.mp4
+  5. scene_03.png
+  6. transition_03_to_04.mp4
+  7. scene_04.png
+  8. transition_04_to_05.mp4
+  9. scene_05.png
+  10. transition_05_to_06.mp4
+  11. scene_06.png
+  12. transition_06_to_07.mp4
+  13. scene_07.png
+  14. transition_07_to_08.mp4
+  15. scene_08.png
+  16. transition_08_to_09.mp4
+  17. scene_09.png
+
+SCENE DURATIONS (suggested)
+============================
+- Scene images: 0.5-1.0 seconds each (hold frames)
+- Transition clips: 5 seconds each (Veo-generated)
+- Total estimated: ~50-55 seconds before trimming
+
+AUDIO TRACK
+============
+${hasAudioFiles ? '- Import audio files from /audio/ folder\n- Each scene_XX_narration file corresponds to its scene\n- Layer narration over the visual timeline' : hasScript ? '- Full narration script in /audio/narration_script.txt\n- Record or use external TTS to generate audio' : '- No audio generated — add narration manually'}
+- Ambient sounds: see /audio/ambience_notes.json
+- Sound effects: see /audio/sfx_notes.json
+
+PROJECT SETTINGS
+=================
+- Aspect Ratio: 9:16 (vertical)
+- Resolution: 1080×1920
+- Frame Rate: 30fps
+- Format: MP4 (H.264)
+
+EXPORT FOR
+===========
+- YouTube Shorts (max 60s)
+- TikTok (max 60s preferred)
+- Instagram Reels (max 90s)
+
+WORKER PRESENCE PER SCENE
+===========================
+${scenes.map((s, i) => {
+  const p = SCENE_WORKER_PRESENCE[i];
+  return `Scene ${String(i + 1).padStart(2, '0')} (${s.title}): ${p?.level === 'required' ? '👷 REQUIRED' : p?.level === 'optional' ? '🔧 OPTIONAL' : '🌫️ NONE'}`;
+}).join('\n')}
+
+NOTES
+======
+- Transitions are GUIDED (start-frame + visual target), not exact A→B frame matches.
+- Check each transition for structural consistency before final export.
+- Trim scene hold-frames to match voiceover pacing.
+- Add subtle zoom/ken-burns in CapCut if scenes feel too static.
+`;
+
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -95,38 +165,39 @@ export function ExportCenter() {
 
       // /metadata
       zip.file('metadata/manifest.json', JSON.stringify(manifest, null, 2));
+      zip.file('metadata/capcut_assembly_guide.txt', buildCapCutGuide());
 
-      // /prompts — per scene
+      // /prompts — per scene (zero-padded for sorting)
       scenes.forEach((s, i) => {
-        const sceneNum = i + 1;
+        const num = String(i + 1).padStart(2, '0');
         const presence = SCENE_WORKER_PRESENCE[i];
-        zip.file(`prompts/scene_${sceneNum}_image.txt`, s.imagePrompt);
-        zip.file(`prompts/scene_${sceneNum}_motion.txt`, s.motionPrompt);
-        zip.file(`prompts/scene_${sceneNum}_narration.txt`, s.narration);
-        zip.file(`prompts/scene_${sceneNum}_notes.txt`, `Title: ${s.title}\nWorker presence: ${presence?.level || 'unknown'}\nWorker cues: ${(s.workerCues || []).join('; ')}\n\nNotes:\n${s.notes}`);
+        zip.file(`prompts/scene_${num}_image_prompt.txt`, s.imagePrompt);
+        zip.file(`prompts/scene_${num}_motion_prompt.txt`, s.motionPrompt);
+        zip.file(`prompts/scene_${num}_narration.txt`, s.narration);
+        zip.file(`prompts/scene_${num}_notes.txt`, 
+          `Title: ${s.title}\nWorker Presence: ${presence?.level || 'unknown'} — ${presence?.description || ''}\nWorker Cues: ${(s.workerCues || []).join('; ')}\n\nContinuity Notes:\n${s.notes}`
+        );
       });
 
-      // /prompts — per transition
+      // /prompts — per transition (zero-padded)
       transitions.forEach((t) => {
-        const pairLabel = `${t.startSceneIndex + 1}_to_${t.endSceneIndex + 1}`;
-        zip.file(`prompts/transition_${pairLabel}.txt`, t.motionPrompt);
-        zip.file(`prompts/transition_${pairLabel}_settings.json`, JSON.stringify({
-          motionPreset: t.motionPreset,
+        const label = `${String(t.startSceneIndex + 1).padStart(2, '0')}_to_${String(t.endSceneIndex + 1).padStart(2, '0')}`;
+        zip.file(`prompts/transition_${label}_motion.txt`, t.motionPrompt);
+        zip.file(`prompts/transition_${label}_settings.json`, JSON.stringify({
           speed: `x${t.speedMultiplier}`,
-          frameMode: t.frameMode,
           settings: t.motionSettings,
         }, null, 2));
       });
 
-      // /audio — text files
-      if (audio.fullScript) {
+      // /audio
+      if (hasScript) {
         zip.file('audio/narration_script.txt', audio.fullScript);
         zip.file('audio/scene_narrations.json', JSON.stringify(audio.sceneNarrations, null, 2));
         zip.file('audio/ambience_notes.json', JSON.stringify(audio.ambienceNotes, null, 2));
         zip.file('audio/sfx_notes.json', JSON.stringify(audio.sfxNotes, null, 2));
       }
 
-      // /audio — download generated TTS audio files
+      // /audio — TTS files
       const audioPromises = (audio.generatedAudioUrls || []).map(async (url, i) => {
         if (!url) return;
         try {
@@ -134,72 +205,57 @@ export function ExportCenter() {
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
           const ext = blob.type.includes('mp3') ? 'mp3' : 'wav';
-          zip.file(`audio/scene_${i + 1}_narration.${ext}`, blob);
+          zip.file(`audio/scene_${String(i + 1).padStart(2, '0')}_narration.${ext}`, blob);
         } catch (err) {
           console.warn(`Could not download audio for scene ${i + 1}:`, err);
-          zip.file(`audio/scene_${i + 1}_url.txt`, url);
+          zip.file(`audio/scene_${String(i + 1).padStart(2, '0')}_url.txt`, url);
         }
       });
 
-      // /scenes — download actual images
+      // /scenes — images (zero-padded)
       const imagePromises = scenes.map(async (s, i) => {
         if (!s.generatedImageUrl) return;
         try {
           const resp = await fetch(s.generatedImageUrl);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
-          zip.file(`scenes/scene_${i + 1}.png`, blob);
+          zip.file(`scenes/scene_${String(i + 1).padStart(2, '0')}.png`, blob);
         } catch (err) {
-          console.warn(`Could not download scene ${i + 1} image:`, err);
-          zip.file(`scenes/scene_${i + 1}_url.txt`, s.generatedImageUrl!);
+          console.warn(`Could not download scene ${i + 1}:`, err);
+          zip.file(`scenes/scene_${String(i + 1).padStart(2, '0')}_url.txt`, s.generatedImageUrl!);
         }
       });
 
-      // /transitions — download actual videos
+      // /transitions — videos (zero-padded)
       const videoPromises = transitions.map(async (t) => {
         if (!t.generatedVideoUrl) return;
         try {
           const resp = await fetch(t.generatedVideoUrl);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
-          zip.file(`transitions/transition_${t.startSceneIndex + 1}_to_${t.endSceneIndex + 1}.mp4`, blob);
+          zip.file(`transitions/transition_${String(t.startSceneIndex + 1).padStart(2, '0')}_to_${String(t.endSceneIndex + 1).padStart(2, '0')}.mp4`, blob);
         } catch (err) {
-          console.warn(`Could not download transition ${t.startSceneIndex + 1}→${t.endSceneIndex + 1}:`, err);
-          zip.file(`transitions/transition_${t.startSceneIndex + 1}_to_${t.endSceneIndex + 1}_url.txt`, t.generatedVideoUrl!);
+          console.warn(`Could not download transition:`, err);
+          zip.file(`transitions/transition_${String(t.startSceneIndex + 1).padStart(2, '0')}_to_${String(t.endSceneIndex + 1).padStart(2, '0')}_url.txt`, t.generatedVideoUrl!);
         }
       });
 
-      // Asset URL fallback list
-      const assetUrls: string[] = [];
+      // Asset URL index
+      const assetIndex: string[] = ['ASSET URL INDEX', '===============', ''];
       scenes.forEach((s, i) => {
-        if (s.generatedImageUrl) assetUrls.push(`Scene ${i + 1}: ${s.generatedImageUrl}`);
+        if (s.generatedImageUrl) assetIndex.push(`Scene ${String(i + 1).padStart(2, '0')}: ${s.generatedImageUrl}`);
       });
+      assetIndex.push('');
       transitions.forEach((t) => {
-        if (t.generatedVideoUrl) assetUrls.push(`Transition ${t.startSceneIndex + 1}→${t.endSceneIndex + 1}: ${t.generatedVideoUrl}`);
+        if (t.generatedVideoUrl) assetIndex.push(`Transition ${t.startSceneIndex + 1}→${t.endSceneIndex + 1}: ${t.generatedVideoUrl}`);
       });
-      zip.file('metadata/asset_urls.txt', assetUrls.join('\n'));
-
-      // CapCut import guide
-      zip.file('metadata/capcut_import_guide.txt', `BUNKER TIME LAPSE — CapCut Import Guide
-========================================
-
-1. Import all images from /scenes/ in order (scene_1.png → scene_9.png)
-2. Import all transition clips from /transitions/ in order
-3. Place each transition clip between its corresponding scene images
-4. Timeline order: Scene 1 → Transition 1→2 → Scene 2 → Transition 2→3 → … → Scene 9
-5. Import narration from /audio/narration_script.txt
-6. Add ambient sounds per /audio/ambience_notes.json
-7. Add SFX per /audio/sfx_notes.json
-8. Set project to 9:16 vertical format
-9. Export for YouTube Shorts / TikTok / Instagram Reels
-
-Duration target: 30-45 seconds total
-Format: 9:16 vertical
-Style: Hyper-realistic construction timelapse
-`);
+      assetIndex.push('');
+      (audio.generatedAudioUrls || []).forEach((url, i) => {
+        if (url) assetIndex.push(`Audio Scene ${i + 1}: ${url}`);
+      });
+      zip.file('metadata/asset_urls.txt', assetIndex.join('\n'));
 
       toast.info('Downloading assets into ZIP…');
-
       await Promise.all([...imagePromises, ...videoPromises, ...audioPromises]);
 
       const blob = await zip.generateAsync({ type: 'blob' });
@@ -210,7 +266,7 @@ Style: Hyper-realistic construction timelapse
       a.click();
       URL.revokeObjectURL(url);
 
-      toast.success('ZIP bundle exported successfully');
+      toast.success('ZIP bundle exported');
     } catch (err) {
       console.error('Export failed:', err);
       toast.error(`Export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -223,38 +279,64 @@ Style: Hyper-realistic construction timelapse
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Export Center</h1>
-        <p className="text-sm text-muted-foreground">Export your bunker restoration project as a ZIP bundle for CapCut assembly.</p>
+        <p className="text-sm text-muted-foreground">Export as a ZIP bundle ready for CapCut assembly.</p>
       </div>
 
+      {/* Readiness checklist */}
       <WorkshopCard>
-        <h2 className="font-bold text-sm mb-3">Project Summary</h2>
+        <h2 className="font-bold text-sm mb-3">Export Readiness</h2>
         <div className="space-y-2 text-xs">
-          <div className="flex justify-between"><span className="text-muted-foreground">Project</span><span className="font-semibold">{name}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Concept</span><span className="font-semibold text-right max-w-[60%] truncate">{selectedIdea?.title}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Environment</span><span className="font-semibold capitalize">{selectedIdea?.environmentType}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Quality</span><span className="font-semibold capitalize">{qualityMode}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Scene Images</span><span className={`font-semibold ${sceneImages === 9 ? 'text-step-complete' : ''}`}>{sceneImages}/9</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Transitions</span><span className={`font-semibold ${transitionClips === 8 ? 'text-step-complete' : ''}`}>{transitionClips}/8</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Audio Script</span><span className="font-semibold">{audio.fullScript ? '✓ Ready' : '—'}</span></div>
+          <div className="flex items-center gap-2">
+            {sceneImages === 9 ? <Check className="w-4 h-4 text-step-complete" /> : <Image className="w-4 h-4 text-muted-foreground" />}
+            <span className={sceneImages === 9 ? 'text-step-complete font-semibold' : 'text-muted-foreground'}>Scene Images: {sceneImages}/9</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {transitionClips === 8 ? <Check className="w-4 h-4 text-step-complete" /> : <Film className="w-4 h-4 text-muted-foreground" />}
+            <span className={transitionClips === 8 ? 'text-step-complete font-semibold' : 'text-muted-foreground'}>Transition Clips: {transitionClips}/8</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasScript ? <Check className="w-4 h-4 text-step-complete" /> : <FileText className="w-4 h-4 text-muted-foreground" />}
+            <span className={hasScript ? 'text-step-complete font-semibold' : 'text-muted-foreground'}>Narration Script: {hasScript ? 'Ready' : 'Missing'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasAudioFiles ? <Check className="w-4 h-4 text-step-complete" /> : <Music className="w-4 h-4 text-muted-foreground" />}
+            <span className={hasAudioFiles ? 'text-step-complete font-semibold' : 'text-muted-foreground'}>TTS Audio: {hasAudioFiles ? 'Generated' : 'Not generated'}</span>
+          </div>
           {continuityFlags.length > 0 && (
-            <div className="flex justify-between"><span className="text-muted-foreground">Continuity Issues</span><span className="font-semibold text-destructive">{continuityFlags.length}</span></div>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-yellow-500" />
+              <span className="text-yellow-500">Continuity Issues: {continuityFlags.length}</span>
+            </div>
           )}
         </div>
       </WorkshopCard>
 
+      {/* Project info */}
       <WorkshopCard>
-        <h2 className="font-bold text-sm mb-3">ZIP Bundle Structure</h2>
-        <div className="space-y-1.5 text-xs font-mono text-muted-foreground">
-          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /scenes — 9 scene images (PNG, 9:16)</div>
-          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /transitions — 8 transition clips (MP4)</div>
-          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /prompts — image + motion + narration per scene</div>
-          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /audio — narration script + ambience + SFX</div>
-          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /metadata — manifest.json + CapCut guide</div>
+        <h2 className="font-bold text-sm mb-3">Project Details</h2>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex justify-between"><span className="text-muted-foreground">Project</span><span className="font-semibold">{name}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Concept</span><span className="font-semibold text-right max-w-[60%] truncate">{selectedIdea?.title}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Environment</span><span className="font-semibold capitalize">{selectedIdea?.environmentType}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Quality</span><span className="font-semibold capitalize">{qualityMode}</span></div>
         </div>
       </WorkshopCard>
 
+      {/* ZIP structure */}
       <WorkshopCard>
-        <h2 className="font-bold text-sm mb-3">Active Models (Google Only)</h2>
+        <h2 className="font-bold text-sm mb-3">ZIP Bundle Structure</h2>
+        <div className="space-y-1.5 text-xs font-mono text-muted-foreground">
+          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /scenes — scene_01.png → scene_09.png</div>
+          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /transitions — transition_01_to_02.mp4 → …_08_to_09.mp4</div>
+          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /prompts — image + motion + narration per scene & transition</div>
+          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /audio — TTS files + script + ambience + SFX notes</div>
+          <div className="flex items-center gap-2"><FolderOpen className="w-3 h-3 text-primary" /> /metadata — manifest.json + capcut_assembly_guide.txt</div>
+        </div>
+      </WorkshopCard>
+
+      {/* Models */}
+      <WorkshopCard>
+        <h2 className="font-bold text-sm mb-3">Google Models Used</h2>
         <div className="flex flex-wrap gap-2">
           <ModelBadge label="Plan" model={models.planning} />
           <ModelBadge label="Image" model={models.image} />
@@ -263,15 +345,15 @@ Style: Hyper-realistic construction timelapse
         </div>
       </WorkshopCard>
 
+      {/* Limitations */}
       <WorkshopCard>
         <div className="flex items-start gap-2">
           <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
           <div className="text-xs space-y-1.5">
-            <p className="font-semibold">Provider Capabilities & Limitations</p>
-            <p className="text-muted-foreground">• <span className="text-foreground">Imagen 4:</span> Real API. Scene-aware worker rendering (ALLOW_ADULT for worker scenes, DONT_ALLOW for atmosphere).</p>
-            <p className="text-muted-foreground">• <span className="text-foreground">Veo 3.1:</span> Start image = initial frame. End image = visual guide. Exact end-frame NOT guaranteed.</p>
-            <p className="text-muted-foreground">• <span className="text-foreground">Workers:</span> Scene-aware presence. Silhouettes/partial figures used as quality fallback.</p>
-            <p className="text-muted-foreground">• <span className="text-foreground">Export:</span> Designed for CapCut manual assembly. Not an auto-edited timeline.</p>
+            <p className="font-semibold">Provider Capabilities</p>
+            <p className="text-muted-foreground">• <span className="text-foreground">Imagen 4:</span> Scene-aware worker rendering. STYLE_IMAGE continuity reference.</p>
+            <p className="text-muted-foreground">• <span className="text-foreground">Veo 3.1:</span> Start frame = real. End frame = visual guide only.</p>
+            <p className="text-muted-foreground">• <span className="text-foreground">Export:</span> Editor-ready assets for CapCut. Not an auto-edited timeline.</p>
           </div>
         </div>
       </WorkshopCard>
