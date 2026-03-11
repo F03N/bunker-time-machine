@@ -227,17 +227,26 @@ For EACH scene, return a JSON array with objects containing:
   • Highly detailed
   • Natural construction progress
   • Vertical 9:16 format
-  • NEVER mention people, workers, hands, or human figures — image generators cannot render them
-  • For construction scenes (2-8): Show tools, equipment, scaffolding, welding sparks, construction materials to imply worker presence
-  • For atmosphere scenes (1, 9): Show only environmental state — no tools, no construction activity)
+  • Worker presence is SCENE-AWARE:
+    - Scene 1: NO workers. Atmosphere only — abandoned, neglected.
+    - Scene 2: Workers REQUIRED. Construction crew arriving, carrying tools, inspecting site, setting up lighting. Show worker silhouettes or partial figures if full rendering is risky.
+    - Scene 3: Workers REQUIRED. Active debris removal, welding, reinforcing. Workers operating tools visible.
+    - Scene 4: Workers OPTIONAL. Mostly clean exterior, organized surroundings. Minimal worker presence OK.
+    - Scene 5: Workers REQUIRED. Crew opening/accessing bunker entrance. Worker silhouettes entering dark space.
+    - Scene 6: Workers REQUIRED. Installing lighting, repairing walls, laying flooring, running cables. Active crew visible.
+    - Scene 7: Workers OPTIONAL. Clean modern interior, minimal finishing activity.
+    - Scene 8: Workers usually ABSENT. Design reveal — furniture, decor, aesthetics.
+    - Scene 9: NO workers. Cinematic reveal of fully restored space.
+  • If direct human rendering risks quality: use worker silhouettes, partial body shots from behind, figures in shadow/backlight, or hard hats / boots / gloved hands on tools
+  • Never use fully detailed front-facing human faces — use silhouettes, back views, or partial figures instead)
 
 - "motionPrompt": string (A SHORT animation prompt per the master prompt. Simple motion instructions such as:
   • "Dust drifting slowly through abandoned space"
-  • "Tools and equipment appearing at site entrance"
-  • "Sparks from welding, debris slowly clearing"
+  • "Workers arriving with tools, setting up equipment"
+  • "Sparks from welding, workers clearing debris"
   • "Slow cinematic camera push toward clean exterior"
-  • "Light flickering on in dark underground entrance"
-  • "Work lights illuminating interior, cables being laid"
+  • "Worker silhouettes entering dark underground entrance"
+  • "Workers installing lights, laying cables in interior"
   • "Bright lights revealing clean polished surfaces"
   • "Furniture and decor elements settling into position"
   • "Wide cinematic reveal of fully restored space"
@@ -249,7 +258,7 @@ For EACH scene, return a JSON array with objects containing:
 
 CRITICAL RULES (from master prompt):
 - Every prompt must maintain the EXACT same bunker identity, entrance geometry, camera angle, and framing
-- NEVER mention people, workers, humans, hands, or figures in imagePrompt
+- Worker presence follows scene-aware logic (see above) — NOT globally blocked
 - Natural construction progress — show gradual, believable improvement
 - No fantasy elements, no instant transformations
 - No magical self-repair
