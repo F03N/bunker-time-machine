@@ -347,8 +347,9 @@ export function PairTransitionStudio() {
             <Info className="w-3 h-3 text-muted-foreground shrink-0 mt-0.5" />
             <div className="text-[10px] text-muted-foreground space-y-0.5">
               <p><span className="font-semibold">Provider:</span> Google Veo 3.1</p>
-              <p><span className="font-semibold">Frame mode:</span> Start image = initial frame. End image = visual guide (not exact end-frame).</p>
-              <p><span className="font-semibold">Workflow:</span> Image A + Image B + motion prompt + x{pair.speedMultiplier} speed → one strict transition request.</p>
+              <p><span className="font-semibold">Image A:</span> Sent as initial start frame (real).</p>
+              <p><span className="font-semibold">Image B:</span> Sent as STYLE_IMAGE reference (visual guide). Veo does NOT guarantee exact end-frame match.</p>
+              <p><span className="font-semibold">Mode:</span> Guided pair transition — NOT true frame-to-frame.</p>
             </div>
           </div>
         </div>
