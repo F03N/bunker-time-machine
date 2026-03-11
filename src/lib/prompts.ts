@@ -2,13 +2,18 @@ import type { QualityMode } from '@/types/project';
 
 /**
  * MASTER SYSTEM PROMPT
- * Faithfully implements the attached master prompt specification.
+ * Faithful implementation of the attached master prompt specification.
  * This is the root creative directive for the entire pipeline.
+ * 
+ * IMPORTANT: This prompt is NOT a summary. It preserves the full meaning,
+ * structure, and all required output specifications from the master prompt.
  */
 export const MASTER_SYSTEM_PROMPT = `You are an expert AI assistant specialized in creating viral bunker restoration timelapse video content for YouTube Shorts, TikTok, and Instagram Reels.
 
 PROJECT OBJECTIVE:
-Create a short-form, hyper-realistic cinematic AI timelapse transformation video showing construction workers transforming a severely damaged or abandoned bunker into a fully restored, modern, functional space.
+Create a short-form, hyper-realistic cinematic AI timelapse transformation video similar to viral construction and restoration content seen on YouTube Shorts, TikTok, and Instagram Reels.
+
+The video must show construction workers transforming a severely damaged or abandoned bunker into a fully restored, modern, functional space.
 
 The transformation must:
 - Feel gradual and realistic
@@ -16,6 +21,62 @@ The transformation must:
 - Show clear progress in every stage
 - Follow a strict 9-scene storytelling structure
 - Be optimized for vertical 9:16 format
+
+9-SCENE STORY STRUCTURE (MANDATORY):
+
+Scene 1 — BEFORE (Damaged State)
+- Abandoned bunker
+- Broken concrete, rust, debris, cracks
+- Poor lighting, dirty atmosphere
+- No workers present
+- Environment feels neglected
+
+Scene 2 — ARRIVAL
+- Construction crew arrives
+- Carrying tools and materials
+- Inspecting site
+- Setting up lighting and equipment
+
+Scene 3 — WORK IN PROGRESS (Exterior Start)
+- Debris removal
+- Welding and repairing structure
+- Reinforcing damaged sections
+- Early visible improvements
+
+Scene 4 — EXTERIOR NEAR COMPLETION
+- Exterior mostly restored
+- Clean surfaces
+- Fresh concrete or metal
+- Organized surroundings
+
+Scene 5 — ENTERING UNDERGROUND
+- Workers open or access the bunker entrance
+- Interior is dark, damaged, unfinished
+- Underground environment revealed
+
+Scene 6 — INTERIOR WORK IN PROGRESS
+- Installing lighting systems
+- Wall repairs
+- Flooring installation
+- Running cables and systems
+- Gradual visible improvement
+
+Scene 7 — INTERIOR FINALIZATION
+- Clean and modern interior
+- Bright cinematic lighting
+- Polished surfaces
+- Fully functional environment
+
+Scene 8 — INTERIOR DESIGN TRANSFORMATION
+- Specific design theme (e.g. modern living room, high-tech studio, command center, office space, luxury underground apartment, research lab, gaming room, minimalist smart home)
+- Furniture and decor placement
+- Final aesthetic touches
+
+Scene 9 — FINAL AFTER (Cinematic Reveal)
+- Fully restored bunker (inside + outside)
+- Futuristic, clean, impressive
+- Wide cinematic reveal shot
+- Highly satisfying transformation
 
 STYLE REQUIREMENTS:
 - Hyper-realistic
@@ -31,21 +92,26 @@ STYLE REQUIREMENTS:
 
 CRITICAL RULES:
 - Every scene must maintain the EXACT same bunker identity, entrance geometry, and camera angle
-- NEVER mention people, workers, humans, hands, or figures in image prompts (generators cannot render them)
-- For construction scenes: Show progress through tools, scaffolding, building materials, welding sparks, and equipment
-- For atmosphere scenes: Show only environmental state — dust, decay, light, or pristine completion
+- NEVER mention people, workers, humans, hands, or figures in image prompts (image generators cannot render them)
+- For construction scenes (2-8): Show progress through tools, scaffolding, building materials, welding sparks, and equipment
+- For atmosphere scenes (1, 9): Show only environmental state — dust, decay, light, or pristine completion
 - NO magical self-repair. All structural changes must have visible tool/equipment evidence
 - All motion must be minimal, restrained, and gradual — construction timelapse style`;
 
 /**
  * IDEA GENERATION PROMPT
- * Per master prompt: Generate 10 unique location concepts, each a completely different environment
+ * Per master prompt: Provide 10 Unique Location Concepts.
+ * Each concept must feature a completely different environment
  * with strong before-and-after contrast.
  */
 export function getIdeaGenerationPrompt(): string {
-  return `Generate exactly 10 unique bunker restoration video concepts. Each concept must feature a completely different environment with strong before-and-after contrast.
+  return `Provide exactly 10 unique bunker restoration video concepts.
 
-The 10 concepts MUST cover these distinct environment types:
+Each concept must:
+- Feature a completely different environment
+- Show strong before-and-after contrast
+
+The 10 concepts MUST cover these distinct environment types (from master prompt):
 1. Mountain bunker
 2. Desert bunker
 3. Coastal bunker
@@ -60,7 +126,7 @@ The 10 concepts MUST cover these distinct environment types:
 For each concept, return a JSON array with objects containing:
 - "id": number (1-10)
 - "title": string (specific bunker type and name, e.g. "Alpine Command Bunker" or "Sahara Desert Outpost")
-- "location": string (city/region, country)
+- "location": string (city/region, country — geographically and historically plausible)
 - "era": string (decade or year, e.g. "1960s Cold War")
 - "description": string (2-3 sentences describing the bunker's current damaged/abandoned state and its restoration potential. Focus on strong before-and-after contrast.)
 - "visualHook": string (one compelling visual detail that makes this concept stand out for viral content)
@@ -77,8 +143,12 @@ Return ONLY the JSON array, no markdown formatting or code blocks.`;
 
 /**
  * SCENE PLAN PROMPT
- * Per master prompt: Generate 9 detailed image prompts and 9 short animation prompts
- * following the EXACT 9-scene storytelling structure.
+ * Per master prompt: For Each Idea Provide:
+ * A. 9 Detailed Text-to-Image Prompts
+ * B. 9 Short Animation Prompts
+ * C. 1 Full Voiceover Script Per Idea (handled separately in audio step)
+ * 
+ * This generates A and B. The voiceover is generated in the Audio step.
  */
 export function getScenePlanPrompt(ideaTitle: string, ideaDescription: string): string {
   return `Create a detailed 9-scene bunker restoration timelapse plan for this concept:
@@ -131,7 +201,7 @@ Scene 7 — INTERIOR FINALIZATION
 - Fully functional environment
 
 Scene 8 — INTERIOR DESIGN TRANSFORMATION
-- Specific design theme (e.g. modern living room, high-tech studio, command center, luxury apartment, research lab, gaming room, minimalist smart home)
+- Specific design theme (choose one: modern living room, high-tech studio, command center, office space, luxury underground apartment, research lab, gaming room, minimalist smart home)
 - Furniture and decor placement
 - Final aesthetic touches
 
@@ -143,37 +213,38 @@ Scene 9 — FINAL AFTER (Cinematic Reveal)
 
 For EACH scene, return a JSON array with objects containing:
 
-- "title": string (the scene name exactly as listed above)
+- "title": string (the scene name exactly as listed above, e.g. "Before (Damaged State)")
 
-- "imagePrompt": string (A detailed text-to-image prompt. MUST specify:
-  • Same bunker structure across ALL scenes
+- "imagePrompt": string (A detailed text-to-image prompt per the master prompt requirements:
   • Same camera angle across ALL scenes
-  • Same framing across ALL scenes
-  • Same location/environment across ALL scenes
-  • Hyper-realistic, cinematic lighting, natural shadows
-  • Vertical 9:16 format
+  • Same location consistency
+  • Same lighting style
+  • Hyper-realistic
+  • Cinematic
   • Highly detailed
+  • Natural construction progress
+  • Vertical 9:16 format
   • NEVER mention people, workers, hands, or human figures — image generators cannot render them
   • For construction scenes (2-8): Show tools, equipment, scaffolding, welding sparks, construction materials to imply worker presence
   • For atmosphere scenes (1, 9): Show only environmental state — no tools, no construction activity)
 
-- "motionPrompt": string (A SHORT animation prompt for video transition. Keep concise. Examples from master prompt:
+- "motionPrompt": string (A SHORT animation prompt per the master prompt. Simple motion instructions such as:
   • "Dust drifting slowly through abandoned space"
   • "Tools and equipment appearing at site entrance"
-  • "Welding sparks flying, debris slowly clearing"
+  • "Sparks from welding, debris slowly clearing"
   • "Slow cinematic camera push toward clean exterior"
   • "Light flickering on in dark underground entrance"
   • "Work lights illuminating interior, cables being laid"
   • "Bright lights revealing clean polished surfaces"
   • "Furniture and decor elements settling into position"
   • "Wide cinematic reveal of fully restored space"
-  Keep motion minimal, restrained, realistic. No dramatic camera movements.)
+  Keep concise. Keep motion minimal, restrained, realistic. No dramatic camera movements.)
 
-- "narration": string (1-2 sentence voiceover narration for this scene. Emotional, satisfying tone.)
+- "narration": string (1-2 sentence voiceover narration for this scene. Emotional, satisfying tone suitable for viral short-form content.)
 
 - "notes": string (Technical notes about maintaining visual continuity with the previous scene. What must stay identical, what changes.)
 
-CRITICAL RULES:
+CRITICAL RULES (from master prompt):
 - Every prompt must maintain the EXACT same bunker identity, entrance geometry, camera angle, and framing
 - NEVER mention people, workers, humans, hands, or figures in imagePrompt
 - Natural construction progress — show gradual, believable improvement
@@ -186,8 +257,12 @@ Return ONLY the JSON array, no markdown formatting or code blocks.`;
 
 /**
  * AUDIO PLAN PROMPT
- * Per master prompt: 1 full voiceover script per idea, 30-45 seconds,
- * emotional and satisfying tone, strong hook, focused on transformation.
+ * Per master prompt: 1 Full Voiceover Script Per Idea
+ * - 30-45 seconds
+ * - Emotional and satisfying tone
+ * - Strong hook
+ * - Focused on transformation
+ * - Powerful final reveal
  */
 export function getAudioPlanPrompt(scenes: { title: string; narration: string }[]): string {
   const sceneList = scenes.map((s, i) => `Scene ${i + 1} (${s.title}): ${s.narration}`).join('\n');
@@ -196,7 +271,8 @@ export function getAudioPlanPrompt(scenes: { title: string; narration: string }[
 Scenes:
 ${sceneList}
 
-VOICEOVER REQUIREMENTS (from master prompt):
+VOICEOVER REQUIREMENTS (from master prompt — follow exactly):
+- 1 Full Voiceover Script Per Idea
 - Total script: 30–45 seconds
 - Emotional and satisfying tone
 - Strong hook at the beginning
@@ -217,6 +293,9 @@ Return ONLY the JSON object, no markdown formatting or code blocks.`;
  * Build a strict pair transition prompt.
  * This is the most critical prompt — it must prioritize image pair fidelity
  * over any creative interpretation. Image A evolving into Image B.
+ * 
+ * Per master prompt: motion must be minimal, restrained, realistic.
+ * Simple motion instructions only. No dramatic camera movements.
  */
 export function buildStrictTransitionPrompt(
   motionPrompt: string,
@@ -251,23 +330,25 @@ STRICT PAIR TRANSITION CONSTRAINTS:
 }
 
 /**
- * Build a continuity review prompt for Gemini to analyze scene images.
+ * Build a continuity review prompt for Gemini to analyze scene descriptions.
+ * Per master prompt: every scene must maintain the EXACT same bunker identity,
+ * entrance geometry, and camera angle.
  */
 export function getContinuityReviewPrompt(): string {
-  return `You are analyzing a sequence of 9 bunker restoration scene images for visual continuity.
+  return `You are analyzing a sequence of 9 bunker restoration scene descriptions for visual continuity.
 
-The 9-scene structure is:
-1. Before (Damaged State) — atmosphere only, no workers
-2. Arrival — tools/equipment appearing
-3. Work in Progress (Exterior) — active construction evidence
-4. Exterior Near Completion — near-finished exterior
-5. Entering Underground — interior revealed
-6. Interior Work In Progress — active interior construction
-7. Interior Finalization — clean modern interior
-8. Interior Design Transformation — furnished and decorated
-9. Final After (Cinematic Reveal) — atmosphere only, completed
+The 9-scene structure (from master prompt) is:
+1. Before (Damaged State) — atmosphere only, no workers, no construction
+2. Arrival — tools/equipment appearing at the site
+3. Work in Progress (Exterior Start) — debris removal, welding, reinforcing
+4. Exterior Near Completion — clean surfaces, fresh concrete/metal
+5. Entering Underground — dark interior revealed
+6. Interior Work In Progress — lighting, wall repairs, flooring, cables
+7. Interior Finalization — clean, modern, bright, polished
+8. Interior Design Transformation — furnished and decorated with specific theme
+9. Final After (Cinematic Reveal) — atmosphere only, fully completed, cinematic
 
-Check each consecutive pair of images for:
+Check each consecutive pair of scenes for:
 1. BUNKER IDENTITY: Is it the same bunker structure throughout?
 2. ENTRANCE GEOMETRY: Does the entrance shape/size stay consistent?
 3. CAMERA ANGLE: Is the viewing angle maintained across all scenes?
