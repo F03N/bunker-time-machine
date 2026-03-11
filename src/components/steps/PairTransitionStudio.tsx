@@ -3,7 +3,7 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { WorkshopCard } from '@/components/WorkshopCard';
 import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
-import { DEFAULT_MOTION_SETTINGS, REPAIR_SCENES } from '@/types/project';
+import { DEFAULT_MOTION_SETTINGS, REPAIR_SCENES, SCENE_WORKER_PRESENCE } from '@/types/project';
 import type { TransitionPair, SpeedMultiplier, MotionPreset } from '@/types/project';
 import { Check, Play, RefreshCw, AlertTriangle, Loader2, Info } from 'lucide-react';
 import { callVeo, getVideoModel, imageUrlToBase64 } from '@/lib/google-ai';
