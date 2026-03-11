@@ -6,6 +6,8 @@ interface GeminiRequest {
   messages: { role: string; content: string }[];
   model?: string;
   systemPrompt?: string;
+  /** Optional image inputs for Gemini Vision analysis */
+  imageInputs?: { base64: string; label: string }[];
 }
 
 interface ImagenRequest {
@@ -53,9 +55,9 @@ interface TtsResponse {
   storagePath?: string;
 }
 
-export async function callGemini({ messages, model, systemPrompt }: GeminiRequest): Promise<string> {
+export async function callGemini({ messages, model, systemPrompt, imageInputs }: GeminiRequest): Promise<string> {
   const { data, error } = await supabase.functions.invoke('gemini-generate', {
-    body: { messages, model, systemPrompt },
+    body: { messages, model, systemPrompt, imageInputs },
   });
 
   if (error) throw new Error(`Gemini error: ${error.message}`);
@@ -89,7 +91,6 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
   if (error) throw new Error(`Veo error: ${error.message}`);
   if (data?.error) throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
 
-  // Veo via Google AI Studio is synchronous or returns a video URL
   if (data.videoUrl) {
     return {
       videoUrl: data.videoUrl,
@@ -99,7 +100,6 @@ export async function callVeo(req: VeoRequest): Promise<VeoResponse> {
     };
   }
 
-  // If polling is needed (long-running operation)
   if (data.operationName && data.status === 'started') {
     const maxPolls = 120;
     const pollInterval = 5000;
@@ -172,9 +172,6 @@ export function getPlanningModel(quality: QualityMode): string {
   return quality === 'fast' ? 'gemini-2.5-flash' : 'gemini-2.5-pro';
 }
 
-/**
- * Convert a storage URL or data URL to base64 string.
- */
 export async function imageUrlToBase64(url: string): Promise<string> {
   if (url.startsWith('data:')) {
     return url.split(',')[1];

@@ -5,19 +5,23 @@ import { StickyAction } from '@/components/StickyAction';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Check, RefreshCw, X, Loader2, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { callGemini, callImagen, getImageModel, getPlanningModel, imageUrlToBase64 } from '@/lib/google-ai';
-import { getContinuityReviewPrompt } from '@/lib/prompts';
-import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES, SCENE_WORKER_PRESENCE } from '@/types/project';
+import { getContinuityReviewPrompt, getStructuralAnchor } from '@/lib/prompts';
+import { validateRepairLogic, REPAIR_SCENES, ATMOSPHERE_ONLY_SCENES, SCENE_WORKER_PRESENCE, getWorkerPromptInstruction } from '@/types/project';
 import type { ContinuityFlag } from '@/types/project';
 import { toast } from 'sonner';
 
 export function ContinuityReview() {
-  const { scenes, updateScene, continuityFlags, setContinuityFlags, goToNextStep, goToPrevStep, qualityMode, name } = useProjectStore();
+  const { scenes, updateScene, continuityFlags, setContinuityFlags, goToNextStep, goToPrevStep, qualityMode, name, selectedIdeaIndex, ideas } = useProjectStore();
   const [selectedScene, setSelectedScene] = useState<number | null>(null);
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
   const [regenerating, setRegenerating] = useState<number | null>(null);
   const [compareMode, setCompareMode] = useState(false);
   const [compareIndex, setCompareIndex] = useState(0);
+  const [visualCheckDone, setVisualCheckDone] = useState(false);
+
+  const ideaTitle = selectedIdeaIndex !== null && ideas[selectedIdeaIndex]
+    ? ideas[selectedIdeaIndex].title : name;
 
   const handleRunCheck = async () => {
     setChecking(true);
@@ -55,7 +59,7 @@ export function ContinuityReview() {
           flags.push({
             sceneIndex: idx,
             type: 'worker-logic',
-            message: `Scene ${idx + 1} (${scene.title}): Workers REQUIRED per master prompt but no worker/tool cues found in image prompt.`,
+            message: `Scene ${idx + 1} (${scene.title}): Workers REQUIRED but no worker/tool cues in prompt.`,
             severity: 'error',
           });
         }
@@ -66,37 +70,34 @@ export function ContinuityReview() {
             flags.push({
               sceneIndex: idx,
               type: 'worker-logic',
-              message: `Scene ${idx + 1} (${scene.title}): Atmosphere-only scene contains construction/worker language. Only environmental state allowed.`,
+              message: `Scene ${idx + 1}: Atmosphere-only scene contains construction language.`,
               severity: 'warning',
             });
           }
         }
       });
 
-      // 4. Prompt-level continuity checks (camera angle, bunker identity keywords)
+      // 4. Prompt-level structural consistency
       const firstPrompt = scenes[0]?.imagePrompt || '';
       for (let i = 1; i < 9; i++) {
         const prompt = scenes[i]?.imagePrompt || '';
         if (!prompt || !firstPrompt) continue;
-
-        // Check if prompts maintain structural consistency keywords
         const structuralTerms = firstPrompt.match(/(?:concrete|steel|metal|stone|brick|bunker|entrance|door|hatch)\s+\w+/gi) || [];
         const missingTerms = structuralTerms.filter(term => {
           const keyword = term.split(/\s+/)[0].toLowerCase();
           return !prompt.toLowerCase().includes(keyword);
         });
-
         if (missingTerms.length > structuralTerms.length * 0.5 && structuralTerms.length > 2) {
           flags.push({
             sceneIndex: i,
             type: 'identity',
-            message: `Scene ${i + 1}: Prompt may drift from bunker identity. Missing structural terms found in Scene 1.`,
+            message: `Scene ${i + 1}: Prompt may drift from bunker identity. Missing structural terms.`,
             severity: 'warning',
           });
         }
       }
 
-      // 5. Progression logic: ensure scenes progress forward, not backward
+      // 5. Progression keyword check
       const progressionKeywords = [
         ['damaged', 'abandoned', 'broken', 'rust', 'debris', 'crack'],
         ['arriving', 'tools', 'inspecting', 'setup'],
@@ -108,7 +109,6 @@ export function ContinuityReview() {
         ['furniture', 'design', 'decor', 'aesthetic'],
         ['reveal', 'futuristic', 'impressive', 'cinematic'],
       ];
-
       for (let i = 0; i < 9; i++) {
         const prompt = scenes[i]?.imagePrompt?.toLowerCase() || '';
         const expected = progressionKeywords[i] || [];
@@ -117,27 +117,49 @@ export function ContinuityReview() {
           flags.push({
             sceneIndex: i,
             type: 'progression',
-            message: `Scene ${i + 1}: Prompt doesn't match expected progression stage. Expected keywords like: ${expected.slice(0, 3).join(', ')}.`,
+            message: `Scene ${i + 1}: Missing expected progression keywords: ${expected.slice(0, 3).join(', ')}.`,
             severity: 'warning',
           });
         }
       }
 
-      // 6. AI-based continuity check if we have images
+      // 6. AI VISUAL continuity check — send actual images to Gemini Vision
       const scenesWithImages = scenes.filter(s => s.generatedImageUrl);
       if (scenesWithImages.length >= 4) {
         try {
-          const sceneDescriptions = scenes.map((s, i) => {
-            const presence = SCENE_WORKER_PRESENCE[i];
-            return `Scene ${i + 1} (${s.title}): ${s.generatedImageUrl ? 'HAS IMAGE' : 'NO IMAGE'} | Workers: ${presence?.level || 'unknown'} | Prompt excerpt: ${s.imagePrompt.substring(0, 200)}`;
-          }).join('\n');
+          toast.info('Running visual analysis with Gemini Vision…');
+          
+          // Collect image data for consecutive pairs
+          const imageContents: any[] = [];
+          for (let i = 0; i < scenes.length; i++) {
+            const scene = scenes[i];
+            if (scene.generatedImageUrl) {
+              try {
+                const base64 = await imageUrlToBase64(scene.generatedImageUrl);
+                imageContents.push({
+                  sceneIndex: i,
+                  title: scene.title,
+                  base64,
+                });
+              } catch {
+                imageContents.push({ sceneIndex: i, title: scene.title, base64: null });
+              }
+            }
+          }
 
+          // Send images to Gemini for visual analysis
           const result = await callGemini({
             messages: [{ 
               role: 'user', 
-              content: `${getContinuityReviewPrompt()}\n\nScene descriptions for analysis:\n${sceneDescriptions}` 
+              content: getContinuityReviewPrompt(),
             }],
             model: getPlanningModel(qualityMode),
+            imageInputs: imageContents
+              .filter(ic => ic.base64)
+              .map(ic => ({
+                base64: ic.base64,
+                label: `Scene ${ic.sceneIndex + 1}: ${ic.title}`,
+              })),
           });
 
           let cleanText = result.trim();
@@ -147,9 +169,10 @@ export function ContinuityReview() {
           
           const aiFlags: ContinuityFlag[] = JSON.parse(cleanText);
           flags.push(...aiFlags);
+          setVisualCheckDone(true);
         } catch (aiErr) {
-          console.warn('AI continuity check failed, using local checks only:', aiErr);
-          toast.info('AI analysis unavailable — using local validation only.');
+          console.warn('AI visual continuity check failed:', aiErr);
+          toast.info('Visual analysis unavailable — using text-based validation only.');
         }
       }
 
@@ -179,8 +202,15 @@ export function ContinuityReview() {
         referenceImageBase64 = await imageUrlToBase64(scenes[idx - 1].generatedImageUrl!);
       }
 
+      // Include worker cues and structural anchor in regeneration
+      const workerInstruction = getWorkerPromptInstruction(idx);
+      const structuralAnchor = getStructuralAnchor(idx, ideaTitle);
+      let fullPrompt = scenes[idx].imagePrompt;
+      if (workerInstruction) fullPrompt += `\n\n${workerInstruction}`;
+      fullPrompt += structuralAnchor;
+
       const result = await callImagen({
-        prompt: scenes[idx].imagePrompt,
+        prompt: fullPrompt,
         model: getImageModel(qualityMode),
         referenceImageBase64,
         sceneIndex: idx,
@@ -206,7 +236,6 @@ export function ContinuityReview() {
   const hasBlockingErrors = continuityFlags.some(f => f.severity === 'error' && f.type !== 'identity');
   const sceneFlags = (idx: number) => continuityFlags.filter(f => f.sceneIndex === idx);
 
-  // Compare mode: side-by-side consecutive pairs
   const comparePairA = scenes[compareIndex];
   const comparePairB = scenes[compareIndex + 1];
 
@@ -214,17 +243,15 @@ export function ContinuityReview() {
     <div className="flex flex-col gap-4 pb-24">
       <div className="px-1">
         <h1 className="text-xl font-bold mb-1">Continuity Review</h1>
-        <p className="text-sm text-muted-foreground">Inspect all 9 scenes for drift, worker logic, and progression consistency.</p>
+        <p className="text-sm text-muted-foreground">Inspect scenes for drift, worker logic, and progression. Includes Gemini Vision analysis.</p>
       </div>
 
-      {/* Scene type legend */}
       <div className="flex gap-2 px-1 text-[10px] flex-wrap">
         <span className="flex items-center gap-1">👷 Workers required</span>
         <span className="flex items-center gap-1">🔧 Workers optional</span>
         <span className="flex items-center gap-1">🌫️ Atmosphere only</span>
       </div>
 
-      {/* View mode toggle */}
       <div className="flex gap-2 px-1">
         <button
           onClick={() => setCompareMode(false)}
@@ -241,22 +268,13 @@ export function ContinuityReview() {
       </div>
 
       {compareMode ? (
-        /* Pair comparison view */
         <div>
           <div className="flex items-center justify-between px-1 mb-2">
-            <button
-              onClick={() => setCompareIndex(Math.max(0, compareIndex - 1))}
-              disabled={compareIndex === 0}
-              className="p-1 rounded bg-secondary disabled:opacity-30"
-            >
+            <button onClick={() => setCompareIndex(Math.max(0, compareIndex - 1))} disabled={compareIndex === 0} className="p-1 rounded bg-secondary disabled:opacity-30">
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span className="text-xs font-semibold">Scene {compareIndex + 1} → Scene {compareIndex + 2}</span>
-            <button
-              onClick={() => setCompareIndex(Math.min(7, compareIndex + 1))}
-              disabled={compareIndex >= 7}
-              className="p-1 rounded bg-secondary disabled:opacity-30"
-            >
+            <button onClick={() => setCompareIndex(Math.min(7, compareIndex + 1))} disabled={compareIndex >= 7} className="p-1 rounded bg-secondary disabled:opacity-30">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
@@ -295,7 +313,6 @@ export function ContinuityReview() {
           </div>
         </div>
       ) : (
-        /* 3x3 Grid view */
         <div className="grid grid-cols-3 gap-2">
           {scenes.map((scene, idx) => {
             const flags = sceneFlags(idx);
@@ -365,14 +382,9 @@ export function ContinuityReview() {
           </div>
           
           {scenes[selectedScene].generatedImageUrl && (
-            <img
-              src={scenes[selectedScene].generatedImageUrl}
-              alt={`Scene ${selectedScene + 1} full`}
-              className="w-full rounded-md aspect-[9/16] object-cover mb-3"
-            />
+            <img src={scenes[selectedScene].generatedImageUrl} alt={`Scene ${selectedScene + 1} full`} className="w-full rounded-md aspect-[9/16] object-cover mb-3" />
           )}
 
-          {/* Worker cues */}
           {REPAIR_SCENES.includes(selectedScene) && scenes[selectedScene].workerCues?.length > 0 && (
             <div className="mb-2 p-2 rounded bg-primary/10">
               <p className="text-[10px] font-semibold text-primary mb-1">Construction Cues in Prompt:</p>
@@ -382,7 +394,6 @@ export function ContinuityReview() {
             </div>
           )}
 
-          {/* Flags */}
           {sceneFlags(selectedScene).map((flag, i) => (
             <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded mb-1 ${flag.severity === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-yellow-600/10 text-yellow-500'}`}>
               <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
@@ -399,13 +410,7 @@ export function ContinuityReview() {
             </div>
           )}
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full mt-2 touch-target"
-            onClick={() => handleRegenerate(selectedScene)}
-            disabled={regenerating !== null}
-          >
+          <Button variant="outline" size="sm" className="w-full mt-2 touch-target" onClick={() => handleRegenerate(selectedScene)} disabled={regenerating !== null}>
             {regenerating === selectedScene ? (
               <span className="flex items-center gap-1"><Loader2 className="w-4 h-4 animate-spin" /> Regenerating…</span>
             ) : (
@@ -430,17 +435,27 @@ export function ContinuityReview() {
             )}
           </button>
         ) : continuityFlags.length === 0 ? (
-          <div className="flex items-center gap-2 text-step-complete text-sm">
-            <Check className="w-5 h-5" />
-            <span className="font-semibold">All 9 scenes pass continuity check.</span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-step-complete text-sm">
+              <Check className="w-5 h-5" />
+              <span className="font-semibold">All 9 scenes pass continuity check.</span>
+            </div>
+            {visualCheckDone && (
+              <p className="text-[10px] text-muted-foreground">✓ Includes Gemini Vision visual analysis</p>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold">
-                {continuityFlags.filter(f => f.severity === 'error').length} errors, {continuityFlags.filter(f => f.severity === 'warning').length} warnings
-              </p>
-              <Button variant="outline" size="sm" onClick={() => { setChecked(false); setContinuityFlags([]); }}>
+              <div>
+                <p className="text-xs font-semibold">
+                  {continuityFlags.filter(f => f.severity === 'error').length} errors, {continuityFlags.filter(f => f.severity === 'warning').length} warnings
+                </p>
+                {visualCheckDone && (
+                  <p className="text-[10px] text-muted-foreground">Includes visual analysis</p>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={() => { setChecked(false); setContinuityFlags([]); setVisualCheckDone(false); }}>
                 Re-check
               </Button>
             </div>

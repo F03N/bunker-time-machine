@@ -3,10 +3,6 @@ import type { QualityMode } from '@/types/project';
 /**
  * MASTER SYSTEM PROMPT
  * Faithful implementation of the attached master prompt specification.
- * This is the root creative directive for the entire pipeline.
- * 
- * IMPORTANT: This prompt is NOT a summary. It preserves the full meaning,
- * structure, and all required output specifications from the master prompt.
  */
 export const MASTER_SYSTEM_PROMPT = `You are an expert AI assistant specialized in creating viral bunker restoration timelapse video content for YouTube Shorts, TikTok, and Instagram Reels.
 
@@ -302,12 +298,15 @@ Return ONLY the JSON object, no markdown formatting or code blocks.`;
 }
 
 /**
- * Build a strict pair transition prompt.
- * This is the most critical prompt — it must prioritize image pair fidelity
- * over any creative interpretation. Image A evolving into Image B.
+ * Build a STRICT pair transition prompt.
  * 
- * Per master prompt: motion must be minimal, restrained, realistic.
- * Simple motion instructions only. No dramatic camera movements.
+ * DESIGN PHILOSOPHY: This prompt must behave like the manual workflow:
+ *   Image A + Image B + one motion prompt + one strict request.
+ * 
+ * NO style injection. NO cinematic reinterpretation. NO prompt inflation.
+ * The numeric settings (motionStrength etc.) are translated into natural
+ * language constraints that Veo can actually interpret, rather than
+ * arbitrary numbers that Veo ignores.
  */
 export function buildStrictTransitionPrompt(
   motionPrompt: string,
@@ -317,82 +316,120 @@ export function buildStrictTransitionPrompt(
   hasRepairActivity: boolean,
   endSceneIndex?: number
 ): string {
+  // Translate settings into strict natural language (Veo doesn't understand numbers)
+  const isUltraStrict = settings.motionStrength <= 15 && settings.morphSuppression >= 95;
+  const isStrict = settings.motionStrength <= 30 && settings.morphSuppression >= 85;
+  
+  // Worker note — scene-aware
   let workerNote: string;
   if (endSceneIndex !== undefined) {
-    // Scene-aware worker logic
     const workerRequired = [1, 2, 4, 5].includes(endSceneIndex);
-    const workerOptional = [3, 6, 7].includes(endSceneIndex);
     const noWorkers = [0, 8].includes(endSceneIndex);
     
     if (workerRequired) {
-      workerNote = 'Workers REQUIRED in end scene: construction crew actively visible (silhouettes, partial figures, or backlit workers operating tools/equipment). Show worker-driven progress.';
-    } else if (workerOptional) {
-      workerNote = 'Workers optional in end scene: minimal presence OK. Focus on results of work (clean surfaces, installed fixtures). Tools and equipment may be visible.';
+      workerNote = 'Workers visible in end state: construction crew silhouettes or partial figures operating tools.';
+    } else if (noWorkers) {
+      workerNote = 'No workers. Environmental state only.';
     } else {
-      workerNote = 'No workers in end scene: atmosphere only — environmental state (dust, light, decay, or pristine completion). No construction activity.';
+      workerNote = 'Workers minimal or absent. Focus on completed work results.';
     }
   } else {
     workerNote = hasRepairActivity
-      ? 'Construction progress visible: workers, tools, scaffolding, welding sparks, equipment. No magical self-repair.'
-      : 'Atmosphere only: environmental state change. No structural modification, no construction activity.';
+      ? 'Construction activity visible: workers, tools, scaffolding.'
+      : 'Atmosphere only. No construction activity.';
   }
 
+  // Ultra-strict mode (x1) — closest to manual workflow
+  if (isUltraStrict) {
+    return `${motionPrompt}
+
+ABSOLUTE CONSTRAINTS — DO NOT DEVIATE:
+- Start frame: "${startSceneTitle}" — End frame: "${endSceneTitle}"
+- LOCKED camera. No camera movement whatsoever. No pan, no tilt, no zoom, no orbit, no dolly.
+- LOCKED composition. Same framing, same angle, same field of view throughout.
+- LOCKED structure. Same bunker geometry, same entrance shape, same wall positions, same proportions.
+- LOCKED environment. Same sky, same terrain, same surrounding elements.
+- ALMOST STATIC video. Only extremely subtle, slow, realistic changes allowed.
+- NO morphing. No shape-shifting. No warping. No melting. No stretching.
+- NO new objects appearing from nowhere. NO objects disappearing.
+- NO style changes. NO color grading shifts. NO lighting mood changes.
+- NO creative interpretation. Reproduce the start image with only the minimal physical changes described in the motion prompt.
+- Construction timelapse: changes happen through physical work, not magic.
+- ${workerNote}`;
+  }
+
+  // Strict mode (x2)
+  if (isStrict) {
+    return `${motionPrompt}
+
+STRICT CONSTRAINTS:
+- Start: "${startSceneTitle}" → End: "${endSceneTitle}"
+- Camera: stationary. No movement.
+- Composition: identical framing and angle throughout.
+- Structure: same bunker geometry, entrance, walls, proportions.
+- Environment: same surroundings, sky, terrain.
+- Motion: very minimal. Slow, subtle, realistic changes only.
+- No morphing. No warping. No objects appearing/disappearing.
+- No creative reinterpretation. Follow the motion prompt literally.
+- Construction timelapse style.
+- ${workerNote}`;
+  }
+
+  // Moderate mode (x3-x4)
   return `${motionPrompt}
 
-STRICT PAIR TRANSITION CONSTRAINTS:
-- This is Image A (${startSceneTitle}) evolving into Image B (${endSceneTitle})
-- Prioritize the image pair over any style interpretation
-- Same bunker structure, same entrance geometry
-- Same camera angle, same framing, same composition
-- Same environment, same structural proportions
-- Only minimal, gradual, realistic changes
-- Construction timelapse style — slow, controlled progression
-- No dramatic motion, no orbit, no camera swing
-- No fast zoom, no redesign, no magical self-repair
-- No random objects appearing, no heavy morphing
-- Motion strength: ${settings.motionStrength}/100
-- Camera intensity: ${settings.cameraIntensity}/100
-- Realism priority: ${settings.realismPriority}%
-- Morph suppression: ${settings.morphSuppression}%
-- Continuity strictness: ${settings.continuityStrictness}%
+CONSTRAINTS:
+- Transition from "${startSceneTitle}" to "${endSceneTitle}".
+- Maintain same bunker structure, entrance geometry, and camera angle.
+- Keep same environment and composition.
+- Controlled, gradual motion. Construction timelapse style.
+- No heavy morphing. No dramatic camera movements.
 - ${workerNote}`;
 }
 
 /**
- * Build a continuity review prompt for Gemini to analyze scene descriptions.
- * Per master prompt: every scene must maintain the EXACT same bunker identity,
- * entrance geometry, and camera angle.
+ * Build a continuity review prompt for Gemini Vision to analyze actual scene images.
  */
 export function getContinuityReviewPrompt(): string {
-  return `You are analyzing a sequence of 9 bunker restoration scene descriptions for visual continuity.
+  return `You are analyzing a sequence of bunker restoration scene images for visual continuity.
 
-The 9-scene structure (from master prompt) is:
-1. Before (Damaged State) — atmosphere only, no workers, no construction
-2. Arrival — tools/equipment appearing at the site
-3. Work in Progress (Exterior Start) — debris removal, welding, reinforcing
-4. Exterior Near Completion — clean surfaces, fresh concrete/metal
+The 9-scene structure is:
+1. Before (Damaged State) — atmosphere only, no workers
+2. Arrival — workers arriving with tools
+3. Work in Progress (Exterior) — active repair
+4. Exterior Near Completion — clean surfaces
 5. Entering Underground — dark interior revealed
-6. Interior Work In Progress — lighting, wall repairs, flooring, cables
-7. Interior Finalization — clean, modern, bright, polished
-8. Interior Design Transformation — furnished and decorated with specific theme
-9. Final After (Cinematic Reveal) — atmosphere only, fully completed, cinematic
+6. Interior Work In Progress — installing systems
+7. Interior Finalization — clean, modern, bright
+8. Interior Design — furnished with theme
+9. Final Reveal — cinematic, no workers
 
-Check each consecutive pair of scenes for:
-1. BUNKER IDENTITY: Is it the same bunker structure throughout?
-2. ENTRANCE GEOMETRY: Does the entrance shape/size stay consistent?
-3. CAMERA ANGLE: Is the viewing angle maintained across all scenes?
-4. FRAMING: Is the composition consistent?
-5. ENVIRONMENT: Are surrounding elements (terrain, vegetation, sky) stable?
-6. STAGE PROGRESSION: Does the restoration progress logically and gradually?
-7. WORKER/TOOL LOGIC: For scenes 2-8, are there visible construction cues (tools, scaffolding, materials)? For scenes 1 and 9, is there NO construction activity?
+ANALYZE EACH CONSECUTIVE PAIR for:
+1. STRUCTURAL IDENTITY: Is it visually the same bunker? Same building shape, same entrance?
+2. CAMERA ANGLE: Is the viewing angle consistent between frames?
+3. COMPOSITION: Is the framing similar? Same subject positioning?
+4. ENVIRONMENT: Are surroundings (terrain, sky, vegetation) consistent?
+5. PROGRESSION: Does restoration progress logically and gradually?
+6. COLOR/LIGHTING: Is the color palette and lighting style consistent?
+7. WORKER PRESENCE: Scenes 2,3,5,6 should show workers. Scenes 1,9 should NOT.
 
 For each issue found, return a JSON array of flag objects:
-- "sceneIndex": number (0-8, which scene has the issue)
+- "sceneIndex": number (0-8)
 - "type": "identity" | "angle" | "framing" | "environment" | "progression" | "worker-logic"
-- "message": string (brief description of the drift/issue)
+- "message": string (specific visual observation)
 - "severity": "warning" | "error"
 
 If all scenes pass, return an empty array: []
-
 Return ONLY the JSON array, no markdown or code blocks.`;
+}
+
+/**
+ * Get the structural identity anchoring suffix for image generation.
+ * This is appended to every image prompt to maximize structural consistency.
+ */
+export function getStructuralAnchor(sceneIndex: number, ideaTitle: string): string {
+  if (sceneIndex === 0) {
+    return `\n\nSTRUCTURAL IDENTITY LOCK: This establishes the canonical bunker appearance for "${ideaTitle}". All subsequent scenes must match this exact structure, entrance geometry, camera angle, framing, and environment.`;
+  }
+  return `\n\nSTRUCTURAL IDENTITY LOCK: This must show the EXACT SAME bunker as Scene 1 — same building shape, same entrance geometry, same camera angle, same framing, same environment, same surrounding terrain. Only the restoration state changes. "${ideaTitle}" — maintain complete visual identity continuity.`;
 }

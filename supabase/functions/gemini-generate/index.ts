@@ -12,22 +12,43 @@ serve(async (req) => {
     const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY");
     if (!GOOGLE_AI_API_KEY) throw new Error("GOOGLE_AI_API_KEY is not configured");
 
-    const { messages, model, systemPrompt } = await req.json();
+    const { messages, model, systemPrompt, imageInputs } = await req.json();
 
     const modelId = model || "gemini-2.5-pro";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${GOOGLE_AI_API_KEY}`;
 
     // Convert messages to Gemini format
-    const contents = [];
+    const contents: any[] = [];
     if (systemPrompt) {
       contents.push({ role: "user", parts: [{ text: systemPrompt }] });
       contents.push({ role: "model", parts: [{ text: "Understood. I will follow these instructions." }] });
     }
+
     for (const msg of messages) {
+      const parts: any[] = [{ text: msg.content }];
       contents.push({
         role: msg.role === "assistant" ? "model" : "user",
-        parts: [{ text: msg.content }],
+        parts,
       });
+    }
+
+    // If image inputs are provided, add them to the last user message for Gemini Vision
+    if (imageInputs && imageInputs.length > 0) {
+      const lastUserIdx = contents.length - 1;
+      if (lastUserIdx >= 0 && contents[lastUserIdx].role === "user") {
+        for (const img of imageInputs) {
+          // Add label before image
+          contents[lastUserIdx].parts.push({ text: `\n[${img.label}]` });
+          // Add inline image data
+          contents[lastUserIdx].parts.push({
+            inlineData: {
+              mimeType: "image/png",
+              data: img.base64,
+            },
+          });
+        }
+        console.log(`Added ${imageInputs.length} images to Gemini request for vision analysis`);
+      }
     }
 
     const response = await fetch(url, {
